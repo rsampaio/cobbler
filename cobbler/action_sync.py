@@ -144,8 +144,9 @@ class BootSync:
         self.logger.info("cleaning link caches")
         self.clean_link_cache()
 
-        self.logger.info("rendering Rsync files")
-        self.rsync_gen()
+        if self.settings.manage_rsync:
+           self.logger.info("rendering Rsync files")
+           self.rsync_gen()
 
         # run post-triggers
         self.logger.info("running post-sync triggers")
@@ -212,10 +213,11 @@ class BootSync:
         utils.rmtree_contents(self.rendered_dir,logger=self.logger)
 
     def clean_link_cache(self):
-        for dirtree in [self.bootloc, self.settings.webdir]:
-            cachedir = '%s/.link_cache'%dirtree
-            cmd = "find %s -maxdepth 1 -type f -links 1 -exec rm -f '{}' ';'"%cachedir
-            utils.subprocess_call(self.logger,cmd)
+        for dirtree in [os.path.join(self.bootloc,'images'), self.settings.webdir]:
+            cachedir = os.path.join(dirtree,'.link_cache')
+            if os.path.isdir(cachedir):
+                cmd = "find %s -maxdepth 1 -type f -links 1 -exec rm -f '{}' ';'"%cachedir
+                utils.subprocess_call(self.logger,cmd)
 
     def rsync_gen(self):
         """

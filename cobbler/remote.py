@@ -146,7 +146,7 @@ class CobblerXMLRPCInterface:
                 self.options.get("iso","/var/www/cobbler/pub/generated.iso"),
                 self.options.get("profiles",None),
                 self.options.get("systems",None),
-                self.options.get("tempdir",None),
+                self.options.get("buildisodir",None),
                 self.options.get("distro",None),
                 self.options.get("standalone",False),
                 self.options.get("source",None),
@@ -208,6 +208,7 @@ class CobblerXMLRPCInterface:
                 self.options.get("file_patterns", ""),
                 self.options.get("prune", False),
                 self.options.get("omit_data", False),
+                self.options.get("sync_all", False),
                 self.logger
             )
         return self.__start_task(runner, token, "replicate", "Replicate", options)
@@ -327,9 +328,11 @@ class CobblerXMLRPCInterface:
         logatron = clogger.Logger("/var/log/cobbler/tasks/%s.log" % event_id)
 
         thr_obj = CobblerThread(event_id,self,logatron,args)
+        on_done_type = type(thr_obj.on_done)
+
         thr_obj._run = thr_obj_fn
         if on_done is not None:
-           thr_obj.on_done = on_done
+           thr_obj.on_done = on_done_type(on_done, thr_obj, CobblerThread)
         thr_obj.start()
         return event_id
 
@@ -1443,7 +1446,7 @@ class CobblerXMLRPCInterface:
         inheritance/graph engine.  Shows what would be installed, not
         the input data.
         """
-        return self.get_system_for_koan(self,name)
+        return self.get_system_for_koan(name)
 
     def get_system_for_koan(self,name,token=None,**rest):
         """
