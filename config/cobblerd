@@ -50,7 +50,7 @@ fi
 RETVAL=0
 
 start() {
-    echo -n $"Starting cobbler daemon: "
+    echo -n "Starting cobbler daemon: "
     if [ -f $SUSE_RELEASE ]; then
         startproc -f -p /var/run/$SERVICE.pid /usr/bin/cobblerd $CONFIG_ARGS
         rc_status -v
@@ -72,7 +72,7 @@ start() {
 }
 
 stop() {
-    echo -n $"Stopping cobbler daemon: "
+    echo -n "Stopping cobbler daemon: "
     if [ -f $SUSE_RELEASE ]; then
         killproc -TERM /usr/bin/cobblerd
         rc_status -v

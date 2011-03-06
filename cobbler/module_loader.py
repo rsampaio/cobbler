@@ -20,8 +20,7 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 02110-1301  USA
 """
-
-import distutils.sysconfig
+import site
 import os
 import sys
 import glob
@@ -35,10 +34,11 @@ MODULES_BY_CATEGORY = {}
 cp = ConfigParser.ConfigParser()
 cp.read("/etc/cobbler/modules.conf")
 
-plib = distutils.sysconfig.get_python_lib()
-mod_path="%s/cobbler/modules" % plib
+import cobbler
+plib = cobbler.__path__[0]
+mod_path="%s/modules" % plib
 sys.path.insert(0, mod_path)
-sys.path.insert(1, "%s/cobbler" % plib)
+sys.path.insert(1, "%s" % plib)
 
 def load_modules(module_path=mod_path, blacklist=None):
     filenames = glob.glob("%s/*.py" % module_path)
