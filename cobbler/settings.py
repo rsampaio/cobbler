@@ -82,6 +82,7 @@ DEFAULTS = {
     "next_server"                 : "127.0.0.1",
     "power_management_default_type" : "ipmitool",
     "power_template_dir"          : "/etc/cobbler/power",
+    "puppet_auto_setup"           : 0,
     "pxe_just_once"               : 0,
     "pxe_template_dir"            : "/etc/cobbler/pxe",
     "redhat_management_permissive" : 0,
@@ -107,7 +108,8 @@ DEFAULTS = {
     "yum_distro_priority"         : 1,
     "yumdownloader_flags"         : "--resolve",
     "reposync_flags"              : "-l -m -d",
-    "ldap_management_default_type": "authconfig"
+    "ldap_management_default_type": "authconfig",
+    "consoles"                     : "/var/consoles"
 }
 
 

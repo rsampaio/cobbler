@@ -1,24 +1,17 @@
 """
-This is some of the code behind 'cobbler sync'.
+--
+-- Copyright (c) 2011 Novell
+-- Uwe Gansert <ug@suse.de>
+--
+-- This software is licensed to you under the GNU General Public License,
+-- version 2 (GPLv2). There is NO WARRANTY for this software, express or
+-- implied, including the implied warranties of MERCHANTABILITY or FITNESS
+-- FOR A PARTICULAR PURPOSE. You should have received a copy of GPLv2
+-- along with this software; if not, see
+-- http://www.gnu.org/licenses/old-licenses/gpl-2.0.txt.
+--
+--
 
-Copyright 2006-2009, Red Hat, Inc
-Michael DeHaan <mdehaan@redhat.com>
-John Eckersberg <jeckersb@redhat.com>
-
-This program is free software; you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation; either version 2 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program; if not, write to the Free Software
-Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
-02110-1301  USA
 """
 
 import os
@@ -54,7 +47,7 @@ def register():
    return "manage/import"
 
 
-class ImportRedhatManager:
+class ImportSuseManager:
 
     def __init__(self,config,logger):
         """
@@ -72,31 +65,19 @@ class ImportRedhatManager:
 
     # required function for import modules
     def what(self):
-        return "import/redhat"
+        return "import/suse"
 
     # required function for import modules
     def check_for_signature(self,path,cli_breed):
        signatures = [
-          'RedHat/RPMS',
-          'RedHat/rpms',
-          'RedHat/Base',
-          'Fedora/RPMS',
-          'Fedora/rpms',
-          'CentOS/RPMS',
-          'CentOS/rpms',
-          'CentOS',
-          'Packages',
-          'Fedora',
-          'Server',
-          'Client',
-          'SL',
+          'suse'
        ]
 
        #self.logger.info("scanning %s for a redhat-based distro signature" % path)
        for signature in signatures:
            d = os.path.join(path,signature)
            if os.path.exists(d):
-               self.logger.info("Found a redhat compatible signature: %s" % signature)
+               self.logger.info("Found a SUSE compatible signature: %s" % signature)
                return (True,signature)
 
        if cli_breed and cli_breed in self.get_valid_breeds():
@@ -126,9 +107,9 @@ class ImportRedhatManager:
         if self.rsync_flags == "":    self.rsync_flags    = None
         if self.network_root == "":   self.network_root   = None
 
-        # If no breed was specified on the command line, set it to "redhat" for this module
+        # If no breed was specified on the command line, set it to "suse" for this module
         if self.breed == None:
-            self.breed = "redhat"
+            self.breed = "suse"
 
         # debug log stuff for testing
         #self.logger.info("self.pkgdir = %s" % str(self.pkgdir))
@@ -154,6 +135,8 @@ class ImportRedhatManager:
             self.arch = self.arch.lower()
             if self.arch == "x86":
                 # be consistent
+                self.arch = "i386"
+            if self.arch in [ 'i486', 'i586', 'i686' ]:
                 self.arch = "i386"
             if self.arch not in self.get_valid_arches():
                 utils.die(self.logger,"arch must be one of: %s" % string.join(self.get_valid_arches(),", "))
@@ -289,27 +272,25 @@ class ImportRedhatManager:
 
     # required function for import modules
     def get_valid_breeds(self):
-        return ["redhat",]
+        return ["suse",]
 
     # required function for import modules
     def get_valid_os_versions(self):
-        return ["rhel2.1", "rhel3", "rhel4", "rhel5", "rhel6", 
-                "fedora5", "fedora6", "fedora7", "fedora8", "fedora9", "fedora10", 
-                "fedora11", "fedora12", "fedora13", "fedora14", "fedora15",
-                "generic24", "generic26", "virtio26", "other",]
+        return []
 
     def get_valid_repo_breeds(self):
-        return ["rsync", "rhn", "yum",]
+        return ["yast", "rsync", "yum"]
 
     def get_release_files(self):
         data = glob.glob(os.path.join(self.get_pkgdir(), "*release-*"))
         data2 = []
         for x in data:
             b = os.path.basename(x)
-            if b.find("fedora") != -1 or \
-               b.find("redhat") != -1 or \
-               b.find("centos") != -1:
-                data2.append(x)
+# FIXME
+#            if b.find("fedora") != -1 or \
+#               b.find("redhat") != -1 or \
+#               b.find("centos") != -1:
+#                data2.append(x)
         return data2
 
     def get_tree_location(self, distro):
@@ -327,7 +308,7 @@ class ImportRedhatManager:
             # SELinux Apache can't symlink to NFS (without some doing)
             if not os.path.exists(dest_link):
                 try:
-                    os.symlink(base, dest_link)
+                    os.symlink(base + "-" + distro.arch, dest_link)
                 except:
                     # this shouldn't happen but I've seen it ... debug ...
                     self.logger.warning("symlink creation failed: %(base)s, %(dest)s") % { "base" : base, "dest" : dest_link }
@@ -381,90 +362,10 @@ class ImportRedhatManager:
                         self.logger.info("looks like we've already scanned here: %s" % dirname)
                         continue
                     self.logger.info("need to process repo/comps: %s" % dirname)
-                    self.process_comps_file(dirname, distro)
                     matches[dirname] = 1
                 else:
                     self.logger.info("directory %s is missing xml comps file, skipping" % dirname)
                     continue
-
-    def process_comps_file(self, comps_path, distro):
-        """
-        When importing Fedora/EL certain parts of the install tree can also be used
-        as yum repos containing packages that might not yet be available via updates
-        in yum.  This code identifies those areas.
-        """
-
-        processed_repos = {}
-
-        masterdir = "repodata"
-        if not os.path.exists(os.path.join(comps_path, "repodata")):
-            # older distros...
-            masterdir = "base"
-
-        # figure out what our comps file is ...
-        self.logger.info("looking for %(p1)s/%(p2)s/*comps*.xml" % { "p1" : comps_path, "p2" : masterdir })
-        files = glob.glob("%s/%s/*comps*.xml" % (comps_path, masterdir))
-        if len(files) == 0:
-            self.logger.info("no comps found here: %s" % os.path.join(comps_path, masterdir))
-            return # no comps xml file found
-
-        # pull the filename from the longer part
-        comps_file = files[0].split("/")[-1]
-
-        try:
-            # store the yum configs on the filesystem so we can use them later.
-            # and configure them in the kickstart post, etc
-
-            counter = len(distro.source_repos)
-
-            # find path segment for yum_url (changing filesystem path to http:// trailing fragment)
-            seg = comps_path.rfind("ks_mirror")
-            urlseg = comps_path[seg+10:]
-
-            # write a yum config file that shows how to use the repo.
-            if counter == 0:
-                dotrepo = "%s.repo" % distro.name
-            else:
-                dotrepo = "%s-%s.repo" % (distro.name, counter)
-
-            fname = os.path.join(self.settings.webdir, "ks_mirror", "config", "%s-%s.repo" % (distro.name, counter))
-
-            repo_url = "http://@@http_server@@/cobbler/ks_mirror/config/%s-%s.repo" % (distro.name, counter)
-            repo_url2 = "http://@@http_server@@/cobbler/ks_mirror/%s" % (urlseg)
-
-            distro.source_repos.append([repo_url,repo_url2])
-
-            # NOTE: the following file is now a Cheetah template, so it can be remapped
-            # during sync, that's why we have the @@http_server@@ left as templating magic.
-            # repo_url2 is actually no longer used. (?)
-
-            config_file = open(fname, "w+")
-            config_file.write("[core-%s]\n" % counter)
-            config_file.write("name=core-%s\n" % counter)
-            config_file.write("baseurl=http://@@http_server@@/cobbler/ks_mirror/%s\n" % (urlseg))
-            config_file.write("enabled=1\n")
-            config_file.write("gpgcheck=0\n")
-            config_file.write("priority=$yum_distro_priority\n")
-            config_file.close()
-
-            # don't run creatrepo twice -- this can happen easily for Xen and PXE, when
-            # they'll share same repo files.
-
-            if not processed_repos.has_key(comps_path):
-                utils.remove_yum_olddata(comps_path)
-                #cmd = "createrepo --basedir / --groupfile %s %s" % (os.path.join(comps_path, masterdir, comps_file), comps_path)
-                cmd = "createrepo %s --groupfile %s %s" % (self.settings.createrepo_flags,os.path.join(comps_path, masterdir, comps_file), comps_path)
-                utils.subprocess_call(self.logger, cmd, shell=True)
-                processed_repos[comps_path] = 1
-                # for older distros, if we have a "base" dir parallel with "repodata", we need to copy comps.xml up one...
-                p1 = os.path.join(comps_path, "repodata", "comps.xml")
-                p2 = os.path.join(comps_path, "base", "comps.xml")
-                if os.path.exists(p1) and os.path.exists(p2):
-                    shutil.copyfile(p1,p2)
-
-        except:
-            self.logger.error("error launching createrepo (not installed?), ignoring")
-            utils.log_exc(self.logger)
 
     def distro_adder(self,distros_added,dirname,fnames):
         """
@@ -547,7 +448,7 @@ class ImportRedhatManager:
             archs = [ proposed_arch ]
 
         if len(archs)>1:
-            if self.breed in [ "redhat" ]:
+            if self.breed in [ "suse" ]:
                 self.logger.warning("directory %s holds multiple arches : %s" % (dirname, archs))
                 return
             self.logger.warning("- Warning : Multiple archs found : %s" % (archs))
@@ -575,6 +476,7 @@ class ImportRedhatManager:
             distro.set_initrd(initrd)
             distro.set_arch(pxe_arch)
             distro.set_breed(self.breed)
+            distro.set_kernel_options("install=http://@@http_server@@/cblr/links/%s" % (name))
             # If a version was supplied on command line, we set it now
             if self.os_version:
                 distro.set_os_version(self.os_version)
@@ -656,33 +558,23 @@ class ImportRedhatManager:
 
         if kernel is not None and kernel.find("PAE") != -1:
             name = name + "-PAE"
+        if kernel is not None and kernel.find("xen") != -1:
+            name = name + "-xen"
 
-        # These are all Ubuntu's doing, the netboot images are buried pretty
-        # deep. ;-) -JC
-        name = name.replace("-netboot","")
-        name = name.replace("-ubuntu-installer","")
-        name = name.replace("-amd64","")
-        name = name.replace("-i386","")
-
-        # we know that some kernel paths should not be in the name
-
-        name = name.replace("-images","")
-        name = name.replace("-pxeboot","")
-        name = name.replace("-install","")
-        name = name.replace("-isolinux","")
+        # we have our kernel in ../boot/<arch>/vmlinuz-xen and
+        # .../boot/<arch>/loader/vmlinuz
+        #
+        name = name.replace("-loader","")
+        name = name.replace("-boot","")
 
         # some paths above the media root may have extra path segments we want
         # to clean up
-
         name = name.replace("-os","")
         name = name.replace("-tree","")
+        name = name.replace("srv-www-cobbler-", "")
         name = name.replace("var-www-cobbler-", "")
         name = name.replace("ks_mirror-","")
         name = name.replace("--","-")
-
-        # remove any architecture name related string, as real arch will be appended later
-
-        name = name.replace("chrp","ppc64")
 
         for separator in [ '-' , '_'  , '.' ] :
             for arch in [ "i386" , "x86_64" , "ia64" , "ppc64", "ppc32", "ppc", "x86" , "s390x", "s390" , "386" , "amd" ]:
@@ -747,9 +639,6 @@ class ImportRedhatManager:
             kdir = os.path.dirname(distro.kernel)
             if self.kickstart_file == None:
                 for rpm in self.get_release_files():
-                    # FIXME : This redhat specific check should go into the importer.find_release_files method
-                    if rpm.find("notes") != -1:
-                        continue
                     results = self.scan_pkg_filename(rpm)
                     # FIXME : If os is not found on tree but set with CLI, no kickstart is searched
                     if results is None:
@@ -787,7 +676,7 @@ class ImportRedhatManager:
             # SELinux Apache can't symlink to NFS (without some doing)
             if not os.path.exists(dest_link):
                 try:
-                    os.symlink(base, dest_link)
+                    os.symlink(base + "-" + distro.arch, dest_link)
                 except:
                     # this shouldn't happen but I've seen it ... debug ...
                     self.logger.warning("symlink creation failed: %(base)s, %(dest)s") % { "base" : base, "dest" : dest_link }
@@ -838,7 +727,7 @@ class ImportRedhatManager:
 
         if not filename.endswith("rpm") and not filename.endswith("deb"):
             return False
-        for match in ["kernel-header", "kernel-source", "kernel-smp", "kernel-largesmp", "kernel-hugemem", "linux-headers-", "kernel-devel", "kernel-"]:
+        for match in ["kernel-header", "kernel-source", "kernel-smp", "kernel-default", "kernel-desktop", "linux-headers-", "kernel-devel", "kernel-"]:
             if filename.find(match) != -1:
                 return True
         return False
@@ -850,42 +739,7 @@ class ImportRedhatManager:
 
         rpm = os.path.basename(rpm)
 
-        # if it looks like a RHEL RPM we'll cheat.
-        # it may be slightly wrong, but it will be close enough
-        # for RHEL5 we can get it exactly.
-
-        for x in [ "4AS", "4ES", "4WS", "4common", "4Desktop" ]:
-            if rpm.find(x) != -1:
-                return ("redhat", 4, 0)
-        for x in [ "3AS", "3ES", "3WS", "3Desktop" ]:
-            if rpm.find(x) != -1:
-                return ("redhat", 3, 0)
-        for x in [ "2AS", "2ES", "2WS", "2Desktop" ]:
-            if rpm.find(x) != -1:
-                return ("redhat", 2, 0)
-
-        # now get the flavor:
-        flavor = "redhat"
-        if rpm.lower().find("fedora") != -1:
-            flavor = "fedora"
-        if rpm.lower().find("centos") != -1:
-            flavor = "centos"
-
-        # get all the tokens and try to guess a version
-        accum = []
-        tokens = rpm.split(".")
-        for t in tokens:
-            tokens2 = t.split("-")
-            for t2 in tokens2:
-                try:
-                    float(t2)
-                    accum.append(t2)
-                except:
-                    pass
-
-        major = float(accum[0])
-        minor = float(accum[1])
-        return (flavor, major, minor)
+        return ("suse", 1, 1)
 
     def get_datestamp(self):
         """
@@ -907,67 +761,12 @@ class ImportRedhatManager:
         path to use.
         """
 
-        if flavor == "fedora":
-
-            # this may actually fail because the libvirt/virtinst database
-            # is not always up to date.  We keep a simplified copy of this
-            # in codes.py.  If it fails we set it to something generic
-            # and don't worry about it.
-
-            try:
-                os_version = "fedora%s" % int(major)
-            except:
-                os_version = "other"
-
-        if flavor == "redhat" or flavor == "centos":
-
-            if major <= 2:
-                # rhel2.1 is the only rhel2
-                os_version = "rhel2.1"
-            else:
-                try:
-                    # must use libvirt version
-                    os_version = "rhel%s" % (int(major))
-                except:
-                    os_version = "other"
+        os_version = "suse"
 
         kickbase = "/var/lib/cobbler/kickstarts"
-        # Look for ARCH/OS_VERSION.MINOR kickstart first
-        #          ARCH/OS_VERSION next
-        #          OS_VERSION next
-        #          OS_VERSION.MINOR next
-        #          ARCH/default.ks next
-        #          FLAVOR.ks next
-        kickstarts = [
-            "%s/%s/%s.%i.ks" % (kickbase,arch,os_version,int(minor)),
-            "%s/%s/%s.ks" % (kickbase,arch,os_version),
-            "%s/%s.%i.ks" % (kickbase,os_version,int(minor)),
-            "%s/%s.ks" % (kickbase,os_version),
-            "%s/%s/default.ks" % (kickbase,arch),
-            "%s/%s.ks" % (kickbase,flavor),
-        ]
-        for kickstart in kickstarts:
-            if os.path.exists(kickstart):
-                return os_version, kickstart
-
-        major = int(major)
-
-        if flavor == "fedora":
-            if major >= 8:
-                return os_version , "/var/lib/cobbler/kickstarts/sample_end.ks"
-            if major >= 6:
-                return os_version , "/var/lib/cobbler/kickstarts/sample.ks"
-
-        if flavor == "redhat" or flavor == "centos":
-            if major >= 5:
-                return os_version , "/var/lib/cobbler/kickstarts/sample.ks"
-
-            return os_version , "/var/lib/cobbler/kickstarts/legacy.ks"
-
-        self.logger.warning("could not use distro specifics, using rhel 4 compatible kickstart")
-        return None , "/var/lib/cobbler/kickstarts/legacy.ks"
+        return os_version, "autoyast_sample.xml"
 
 # ==========================================================================
 
 def get_import_manager(config,logger):
-    return ImportRedhatManager(config,logger)
+    return ImportSuseManager(config,logger)
