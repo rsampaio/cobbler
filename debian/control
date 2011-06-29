@@ -8,8 +8,8 @@ Homepage: https://fedoraproject.org/cobbler
 
 Package: cobbler
 Architecture: all
-Depends: ${python:Depends}, python, apache2, libapache2-mod-python, python-support, python-yaml, python-netaddr, python-cheetah, syslinux | syslinux-common, python-simplejson, python-urlgrabber, python-support, libapache2-mod-wsgi, lsb-release, python-django
-Suggests: rsync, tftpd-hpa, mkisofs, tftpd-hpa, dhcp3-server, createrepo
+Depends: ${python:Depends}, python, apache2, libapache2-mod-python, python-support, python-yaml, python-netaddr, python-cheetah, syslinux | syslinux-common, python-simplejson, python-urlgrabber, python-support, libapache2-mod-wsgi, lsb-release, python-django, tftpd-hpa, debmirror, cman, dnsmasq
+Suggests: rsync, mkisofs, dhcp3-server, createrepo
 Description: Install server
  Cobbler is a network install server.  Cobbler
  supports PXE, virtualized installs, and
