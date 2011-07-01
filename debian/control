@@ -1,5 +1,5 @@
 Source: cobbler
-Section: unknown
+Section: python
 Priority: optional
 Maintainer: Maintainer: Jasper Poppe <jpoppe@ebay.com>
 Build-Depends: debhelper (>= 7), python-cheetah, python-yaml, git-core, python, cdbs
