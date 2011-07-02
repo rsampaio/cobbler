@@ -181,6 +181,7 @@ if __name__ == "__main__":
             ("installer_templates",         ["installer_templates/*"]),
             ("%skickstarts" % libpath,      ["kickstarts/*"]),
             ("%ssnippets" % libpath,        ["snippets/*"]),
+            ("%sloaders" % libpath,         ["loaders/*"]),
             ("web",                         ["web/*.*"]),
             ("%s" % webcontent,             ["web/content/*.*"]),
             ("web/cobbler_web",             ["web/cobbler_web/*.*"]),

@@ -27,6 +27,7 @@ case "$1" in
         if [ -d /var/lib/tftpboot ]; then
             mkdir -p /var/lib/tftpboot
         fi
+        cd /var/lib/cobbler/loaders
     ;;
 
     abort-upgrade|abort-remove|abort-deconfigure)
