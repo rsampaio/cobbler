@@ -113,9 +113,12 @@ _re_initrd = re.compile(r'(initrd(.*).img|ramdisk.image.gz)')
 
 # all logging from utils.die goes to the main log even if there
 # is another log.
-main_logger = clogger.Logger()
+main_logger = None #  the logger will be lazy loaded later
 
 def die(logger, msg):
+    global main_logger
+    if main_logger is None:
+        main_logger = clogger.Logger()
 
     # log the exception once in the per-task log or the main
     # log if this is not a background op.
@@ -718,6 +721,8 @@ def flatten(data):
         data["ks_meta"] = hash_to_string(data["ks_meta"])
     if data.has_key("template_files"):
         data["template_files"] = hash_to_string(data["template_files"])
+    if data.has_key("boot_files"):
+        data["boot_files"] = hash_to_string(data["boot_files"])
     if data.has_key("fetchable_files"):
         data["fetchable_files"] = hash_to_string(data["fetchable_files"])
     if data.has_key("repos") and isinstance(data["repos"], list):
@@ -799,6 +804,7 @@ def __consolidate(node,results):
     hash_removals(results,"kernel_options_post")
     hash_removals(results,"ks_meta")
     hash_removals(results,"template_files")
+    hash_removals(results,"boot_files")
     hash_removals(results,"fetchable_files")
 
 def hash_removals(results,subkey):
@@ -1036,9 +1042,13 @@ def tftpboot_location():
     # otherwise, guess based on the distro
     (make,version) = os_release()
     if make == "fedora" and version >= 9:
-       return "/var/lib/tftpboot"
+        return "/var/lib/tftpboot"
+    elif make =="redhat" and version >= 6:
+        return "/var/lib/tftpboot"
     elif make == "debian" or make == "ubuntu":
-       return "/var/lib/tftpboot"
+        return "/var/lib/tftpboot"
+    if make == "suse":
+        return "/srv/tftpboot"
     return "/tftpboot"
 
 def can_do_public_content(api):
@@ -1656,7 +1666,7 @@ def subprocess_sp(logger, cmd, shell=True):
     if logger is not None:
         logger.info("running: %s" % cmd)
     try:
-        sp = sub_process.Popen(cmd, shell=shell, stdout=sub_process.PIPE, stderr=sub_process.PIPE)
+        sp = sub_process.Popen(cmd, shell=shell, stdout=sub_process.PIPE, stderr=sub_process.PIPE, close_fds=True)
     except OSError:
         if logger is not None:
             log_exc(logger)
@@ -2041,17 +2051,19 @@ def loh_sort_by_key(datastruct, indexkey):
 
 def dhcpconf_location(api):
     version = api.os_version
+    (dist, ver) = api.get_os_details()
     if version[0] in [ "redhat", "centos" ] and version[1] < 6:
         return "/etc/dhcpd.conf"
     elif version[0] in [ "fedora" ] and version[1] < 11: 
+        return "/etc/dhcpd.conf"
+    elif dist == "suse":
         return "/etc/dhcpd.conf"
     else:
         return "/etc/dhcp/dhcpd.conf"
 
 def link_distro(settings, distro):
     # find the tree location
-    dirname = os.path.dirname(distro.kernel)
-    base = os.path.split(os.path.split(dirname)[0])[0]
+    base = os.path.join(settings.webdir, "ks_mirror", distro.name)
     dest_link = os.path.join(settings.webdir, "links", distro.name)
 
     # create the links directory only if we are mirroring because with

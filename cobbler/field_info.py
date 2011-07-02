@@ -27,10 +27,10 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 
 USES_TEXTAREA = [
    "comment",
-   "mgmt_classes",
    "mgmt_parameters",
-   "template_files"
-   "fetchable_files"
+   "template_files",
+   "fetchable_files",
+   "boot_files"
 ]
 
 # fields that use a multi select in the web app
@@ -63,6 +63,8 @@ USES_CHECKBOX = [
    "*netboot_enabled",
    "netboot_enabled",
    "*static",
+   "*management",
+   "management",
    "ipv6_autoconfiguration",
    "keep_updated",
    "mirror_locally",
@@ -120,6 +122,7 @@ BLOCK_MAPPINGS = {
    "*bonding"        : "Networking",
    "*bonding_opts"   : "Networking",
    "*bonding_master" : "Networking",
+   "*management"     : "Networking",
    "*dns_name"       : "Networking",
    "*static_routes"  : "Networking",
    "*subnet"         : "Networking",
@@ -136,11 +139,10 @@ BLOCK_MAPPINGS = {
    "ipv6_autoconfiguration" : "Networking (Global)",
    "repos"                  : "General",
    "dhcp_tag"               : "Advanced",
-   "network_widget_c"       : "Management",
    "mgmt_classes"           : "Management",
-   "network_widget_d"       : "Management",
    "mgmt_parameters"        : "Management",
    "template_files"         : "Management",
+   "boot_files"             : "Management",
    "fetchable_files"        : "Management",
    "network_widget_a"       : "Networking",
    "network_widget_b"       : "Networking",

@@ -39,10 +39,12 @@ TODO
 
 VERSION=0.5
 
-import sys, os, stat, errno, time, optparse, re, socket, pwd
+import sys, os, stat, errno, time, optparse, re, socket, pwd, traceback
 import logging, logging.handlers
 import xmlrpclib
 from collections import deque
+
+from fnmatch import fnmatch
 
 from cobbler.utils import local_get_cobbler_api_url, tftpboot_location
 
@@ -207,7 +209,7 @@ class DATAPacket(Packet):
         self.blk_num = blk_num;
     def marshall(self):
         return pack("!HH %ds" % (len(self.data)),
-                    TFTP_OPCODE_DATA, self.blk_num & 0xFFFF ,self.data)
+                    TFTP_OPCODE_DATA, self.blk_num & 0xFFFF ,str(self.data))
 
 class ACKPacket(Packet):
     """The ACK packet.  We only receive these.
@@ -336,9 +338,9 @@ class XMLRPCSystem:
                 logging.info(str(e))
                 name = None
             except:
-                (etype,eval,etrace) = sys.exc_info()
-                logging.warn("Exception retrieving rendered system: %s (%s)"
-                            % (etype,eval))
+                (etype,eval,) = sys.exc_info()[:2]
+                logging.warn("Exception retrieving rendered system: %s (%s):%s"
+                                % (name,eval,traceback.format_exc()))
                 name = None
 
         if name is not None:
@@ -348,9 +350,11 @@ class XMLRPCSystem:
                 self.attrs  = self.system
                 self.name   = self.attrs["name"]
             except:
-                (etype,eval,etrace) = sys.exc_info()
-                logging.warn ("Exception Materializing system %s" % name)
-                del XMLRPCSystem.cache[ip_address]
+                (etype,eval,) = sys.exc_info()[:2]
+                logging.warn ("Exception Materializing system %s (%s):%s"
+                                % (name,eval,traceback.format_exc()))
+                if XMLRPCSystem.cache.has_key(ip_address):
+                    del XMLRPCSystem.cache[ip_address]
                 self.system = None
                 self.attrs  = dict()
                 self.name   = str(ip_address)
@@ -373,7 +377,8 @@ class Request:
     and it is responsible for keeping track of where the file transfer
     is..."""
     def __init__(self,rrq_packet,local_sock,templar):
-        self.filename    = rrq_packet.filename
+        # Trim leading /s, since that's kinda implicit
+        self.filename    = rrq_packet.filename.lstrip('/') # assumed
         self.type        = "chroot"
         self.remote_addr = rrq_packet.remote_addr
         self.req_options = rrq_packet.req_options
@@ -384,20 +389,22 @@ class Request:
         self.expand      = False
         self.templar     = templar
 
-        # Sanitize input.
-
-        # Trim leading /s, since that's kinda implicit
-        self.filename = re.compile(r"^/*([^/].*)").match(self.filename).group(1)
+        # Sanitize input more
         # Strip out \s
         self.filename = self.filename.replace('\\','')
         # Look for elements starting with ".", and blow up.
-        for elm in self.filename.split("/"):
-            if elm[0] == ".":
-                self.error_code = 2
-                self.error_str = "Invalid file name"
-                self.state = TFTP_OPCODE_ERROR
-                self.filename = None
-                break;
+        try:
+            if len(self.filename) == 0:
+                    raise RuntimeError("Empty Path: ")
+            for elm in self.filename.split("/"):
+                if elm[0] == ".":
+                    raise RuntimeError("Path includes '.': ")
+        except RuntimeError, e:
+            logging.warn(str(e) + rrq_packet.filename)
+            self.error_code = 2
+            self.error_str = "Invalid file name"
+            self.state = TFTP_OPCODE_ERROR
+            self.filename = None
 
         OPTIONS["active"] += 1
         self.system = XMLRPCSystem(self.remote_addr[0])
@@ -426,7 +433,7 @@ class Request:
             suffix = "/%08X" %unpack('!L',socket.inet_aton(self.system.name))[0]
             if suffix and trimmed[len(trimmed)-len(suffix):] == suffix:
                 trimmed = trimmed.replace(suffix,"")
-                logging.debug('_remap_name: converted %s to %s'
+                logging.debug('_remap_strip_ip: converted %s to %s'
                               % (filename, trimmed))
                 return trimmed
         else:
@@ -445,7 +452,7 @@ class Request:
 
                 if suffix and trimmed[len(trimmed)-len(suffix):] == suffix:
                     trimmed = trimmed.replace(suffix,"")
-                    logging.debug('_remap_name: converted %s to %s'
+                    logging.debug('_remap_strip_ip: converted %s to %s'
                                   % (filename, trimmed))
                     return trimmed
         return filename
@@ -466,6 +473,93 @@ class Request:
             else:
                 logging.debug("Couldn't load profile %s" % m.group(1))
         return filename,"chroot"
+
+    def _remap_name_via_fetchable(self,filename):
+        fetchable_files = self.system.attrs["fetchable_files"].strip()
+        if not fetchable_files:
+            return filename,None
+
+        # We support two types of matches in fetchable_files
+        # * Direct match ("/foo=/bar")
+        # * Globs on directories ("/foo/*=/bar")
+        #   A glob is realliy just a directory remap
+        glob_pattern = re.compile("(/)?[*]$")
+
+        # Look for the file in the fetchable_files hash
+        # XXX: Template name
+        for (k,v) in map(lambda x: x.split("="),fetchable_files.split(" ")):
+            k = k.lstrip('/') # Allow some slop w/ starting /s
+            # Full Path: "/foo=/bar"
+            result = None
+
+            if k == filename:
+                logging.debug('_remap_name: %s => %s' % (k,v))
+                result = v
+            # Glob Path: "/foo/*=/bar/"
+            else:
+                match = glob_pattern.search(k)
+                if match and fnmatch("/"+filename,"/"+k):
+                    logging.debug('_remap_name (glob): %s => %s' % (k,v))
+                    # Erase the trailing '/?[*]' in key
+                    # Replace the matching leading portion in filename
+                    # with the value 
+                    # Expand the result
+                    if match.group(1):
+                        lead_dir = glob_pattern.sub(match.group(1),k)
+                    else:
+                        lead_dir = glob_pattern.sub("",k)
+                    result = filename.replace(lead_dir,v,1)
+            
+            # Render the target, to expand things like "$kernel"
+            if result is not None:
+                try:
+                    return self.templar.render(
+                        result, self.system.attrs, None).strip(),"template"
+                except Cheetah.Parser.ParseError, e:
+                    logging.warn('Unable to expand name: %s(%s): %s'
+                                 % (filename,result,e))
+
+        return filename,None
+
+    def _remap_name_via_boot_files(self,filename):
+
+        boot_files = self.system.attrs["boot_files"].strip()
+        if not boot_files:
+            logging.debug('_remap_name: no boot_files for %s/%s'
+                          % (self.system,filename))
+            return filename,None
+
+        filename = filename.lstrip('/') # assumed
+
+        # Override "img_path", as that's the only variable used by 
+        # the VMWare boot_files support, and they use a slightly different
+        # definition: one that's relative to tftpboot
+        attrs = self.system.attrs.copy()
+        attrs["img_path"] = os.path.join("images",attrs["distro_name"])
+
+        # Look for the file in the boot_files hash
+        for (k,v) in map(lambda x: x.split("="),boot_files.split(" ")):
+            k = k.lstrip('/') # Allow some slop w/ starting /s
+
+            # Render the key, to expand things like "$img_path"
+            try:
+                expanded_k = self.templar.render(k, attrs, None)
+            except Cheetah.Parser.ParseError, e:
+                logging.warn('Unable to expand name: %s(%s): %s'
+                             % (filename,k,e))
+                continue
+
+            if expanded_k == filename:
+                # Render the target, to expand things like "$kernel"
+                logging.debug('_remap_name: %s => %s' % (expanded_k,v))
+
+                try:
+                    return self.templar.render(v, attrs,None).strip(),"template"
+                except Cheetah.Parser.ParseError, e:
+                    logging.warn('Unable to expand name: %s(%s): %s'
+                                 % (filename,v,e))
+
+        return filename,None
 
     def _remap_name(self,filename):
         filename = filename.lstrip('/') # assumed
@@ -490,22 +584,13 @@ class Request:
         if self.system.attrs.has_key(noext) and noext in ["kernel"]:
             return self.system.attrs[noext],"template"
 
-        fetchable_files = self.system.attrs["fetchable_files"].strip()
-        if not fetchable_files:
-            return self._remap_via_profiles(trimmed)
+        (new_name,find_type) = self._remap_name_via_fetchable(trimmed)
+        if find_type is not None:
+            return new_name,find_type
 
-        # Look for the file in the fetchable_files hash
-        for (k,v) in map(lambda x: x.split("="),fetchable_files.split(" ")):
-            # Render the target, to expand things like "$kernel"
-            if k == trimmed:
-                logging.debug('_remap_name: %s => %s' % (k,v))
-                try:
-                    return self.templar.render(
-                        v, self.system.attrs, None).strip(),"template"
-                except Cheetah.Parser.ParseError, e:
-                    logging.warn('Unable to expand name: %s(%s): %s'
-                                 % (trimmed,v,e))
-                    return self._remap_via_profiles(trimmed)
+        (new_name,find_type) = self._remap_name_via_boot_files(trimmed)
+        if find_type is not None:
+            return new_name,find_type
 
         # last try: try profiles
         return self._remap_via_profiles(trimmed)
@@ -548,8 +633,8 @@ class Request:
                 else:
                     logging.debug('Template failed to render.')
             else:
-                logging.debug('Not rendering binary file %s.'
-                              % (self.filename))
+                logging.debug('Not rendering binary file %s (%s).'
+                              % (self.filename,output))
         elif self.type == "hash_value":
             self.file = RenderedFile(self.system.attrs[self.filename])
             self.block_count = 0

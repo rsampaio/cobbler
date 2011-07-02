@@ -126,15 +126,27 @@ def start_install(name=None,
     if profile_data.has_key("breed"):
         breed = profile_data["breed"]
         if breed != "other" and breed != "":
-            if breed in [ "debian", "suse", "redhat" ]:
+            if breed in [ "ubuntu", "debian", "redhat" ]:
                 guest.set_os_type("linux")
+            elif breed == "suse":
+                guest.set_os_type("linux")
+                # SUSE requires the correct arch to find
+                # kernel+initrd on the inst-source /boot/<arch>/loader/...
+                guest.arch = profile_data["arch"]
+                if guest.arch in [ "i386", "i486", "i586" ]:
+                    guest.arch = "i686"
             elif breed in [ "windows" ]:
                 guest.set_os_type("windows")
             else:
                 guest.set_os_type("unix")
             if profile_data.has_key("os_version"):
                 # FIXME: when os_version is not defined and it's linux, do we use generic24/generic26 ?
-                version = profile_data["os_version"]
+                if breed == "ubuntu":
+                    # If breed is Ubuntu, need to set the version to the type of "ubuntu<version>"
+                    # as defined by virtinst. (i.e. ubuntunatty)
+                    version = "ubuntu%s" % profile_data["os_version"]
+                else:
+                    version = profile_data["os_version"]
                 if version != "other" and version != "":
                     try:
                         guest.set_os_variant(version)

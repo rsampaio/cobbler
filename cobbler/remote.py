@@ -142,8 +142,12 @@ class CobblerXMLRPCInterface:
         profiles without using PXE.
         """
         def runner(self):
+            # FIXME: better use webdir from the settings?
+            webdir = "/var/www/cobbler/"
+            if os.path.exists("/srv/www"):
+                webdir = "/srv/www/cobbler/"
             return self.remote.api.build_iso(
-                self.options.get("iso","/var/www/cobbler/pub/generated.iso"),
+                self.options.get("iso",webdir+"/pub/generated.iso"),
                 self.options.get("profiles",None),
                 self.options.get("systems",None),
                 self.options.get("buildisodir",None),
@@ -154,7 +158,7 @@ class CobblerXMLRPCInterface:
                 self.logger
             )
         def on_done(self):
-            if self.options.get("iso","") == "/var/www/cobbler/pub/generated.iso":
+            if self.options.get("iso","") == webdir+"/pub/generated.iso":
                 msg = "ISO now available for <A HREF=\"/cobbler/pub/generated.iso\">download</A>"
                 self.remote._new_event(msg)
         return self.__start_task(runner, token, "buildiso", "Build Iso", options, on_done)
@@ -892,7 +896,7 @@ class CobblerXMLRPCInterface:
 
                     # in place modifications allow for adding a key/value pair while keeping other k/v
                     # pairs intact.
-                    if k in [ "ks_meta", "kernel_options", "kernel_options_post", "template_files", "fetchable_files"] and attributes.has_key("in_place") and attributes["in_place"]:
+                    if k in [ "ks_meta", "kernel_options", "kernel_options_post", "template_files", "boot_files", "fetchable_files"] and attributes.has_key("in_place") and attributes["in_place"]:
                         details = self.get_item(object_type,object_name)
                         v2 = details[k]
                         (ok, input) = utils.input_string_or_hash(v)
@@ -1667,7 +1671,7 @@ class CobblerXMLRPCInterface:
             return True
         else:
             self._log("invalid token",token=token)
-            raise CX("invalid token: %s" % token)
+            return False
 
     def __name_to_object(self,resource,name):
         if resource.find("distro") != -1:
@@ -1759,10 +1763,9 @@ class CobblerXMLRPCInterface:
 
     def token_check(self,token):
         """
-        This is a demo function that does not return anything useful.
+        Checks to make sure a token is valid or not
         """
-        self.__validate_token(token)
-        return True
+        return self.__validate_token(token)
 
     def sync(self,token):
         """
@@ -2353,6 +2356,7 @@ def test_xmlrpc_rw():
    }, token)
    server.modify_system(sid, "mgmt_classes", [ "one", "two", "three"], token)
    server.modify_system(sid, "template_files", {}, token)
+   server.modify_system(sid, "boot_files",     {}, token)
    server.modify_system(sid, "fetchable_files", {}, token)
    server.modify_system(sid, "comment", "...", token)
    server.modify_system(sid, "power_address", "power.example.org", token)
