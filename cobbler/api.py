@@ -620,18 +620,18 @@ class BootAPI:
 
     def get_template_file_for_profile(self,obj,path):
         template_results = self.pxegen.write_templates(obj,False,path)
-        if template_results.has_key(path):
-            return template_results[path]
-        else:
-            return "# template path not found for specified profile"
+        for key in template_results.keys():
+            if os.path.basename(key) in (path):
+                return template_results[key]
+        return "# template path not found for specified profile"
 
     def get_template_file_for_system(self,obj,path):
         template_results = self.pxegen.write_templates(obj,False,path)
-        if template_results.has_key(path):
-            return template_results[path]
-        else:
-            return "# template path not found for specified system"
-
+        for key in template_results.keys():
+            if os.path.basename(key) in (path):
+                return template_results[key]
+        return "# template path not found for specified system"
+    
     # ==========================================================================
 
     def generate_kickstart(self,profile,system):
