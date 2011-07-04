@@ -1,0 +1,1 @@
+/usr/bin/expect /etc/conductor/ssh_reboot "$power_address" "$power_user" "$power_pass"
