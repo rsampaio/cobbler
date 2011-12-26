@@ -28,6 +28,11 @@ allow_duplicate_macs: 0
 # # # ok with this limitation.
 anamon_enabled: 0
 
+# If using authn_pam in the modules.conf, this can be configured
+# to change the PAM service authentication will be tested against.
+# The default value is "login".
+authn_pam_service: "login"
+
 # Email out a report when cobbler finishes installing a system.
 # enabled: set to 1 to turn this feature on
 # sender: optional
@@ -197,6 +202,10 @@ manage_dhcp: 0
 # the choice of DNS mangement engine is in /etc/cobbler/modules.conf
 manage_dns: 0
 
+# set to 1 to enable Cobbler's TFTP management features.
+# the choice of TFTP mangement engine is in /etc/cobbler/modules.conf
+manage_tftpd: 1
+
 # set to 1 to enable Cobbler's RSYNC management features.
 manage_rsync: 0
 
@@ -310,8 +319,8 @@ run_install_triggers: 1
 # enables a trigger which version controls all changes to /var/lib/cobbler
 # when add, edit, or sync events are performed.  This can be used
 # to revert to previous database versions, generate RSS feeds, or for
-# other auditing or backup purposes.  git is the recommend SCM
-# for use with this feature.  
+# other auditing or backup purposes. "git" and "hg" are currently suported, 
+# but git is the recommend SCM for use with this feature.
 scm_track_enabled: 0
 scm_track_mode: "git"
 

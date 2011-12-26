@@ -4,6 +4,26 @@ from django.template import RequestContext
 from django.http import HttpResponse
 from django.http import HttpResponseRedirect
 from django.shortcuts import render_to_response
+from django.views.decorators.http import require_POST
+
+try:
+    from django.views.decorators.csrf import csrf_protect
+except:
+    # Old Django, fudge the @csrf_protect decorator to be a pass-through 
+    # that does nothing. Django decorator shell based on this page: 
+    # http://passingcuriosity.com/2009/writing-view-decorators-for-django/
+    def csrf_protect(f):
+        def _dec(view_func):
+            def _view(request,*args,**kwargs):
+                return view_func(request,*args,**kwargs)
+            _view.__name__ = view_func.__name__
+            _view.__dict__ = view_func.__dict__
+            _view.__doc__  = view_func.__doc__
+            return _view
+        if f is None:
+            return _dec
+        else:
+            return _dec(f)
 
 import xmlrpclib
 import time
@@ -37,7 +57,7 @@ def index(request):
    if not test_user_authenticated(request): return login(request,next="/cobbler_web")
 
    t = get_template('index.tmpl')
-   html = t.render(Context({
+   html = t.render(RequestContext(request,{
         'version' : remote.version(request.session['token']),
         'username': username,
    }))
@@ -49,9 +69,9 @@ def task_created(request):
    """
    Let's the user know what to expect for event updates.
    """
-   if not test_user_authenticated(request): return login(request)
+   if not test_user_authenticated(request): return login(request, next="/cobbler_web/task_created")
    t = get_template("task_created.tmpl")
-   html = t.render(Context({
+   html = t.render(RequestContext(request,{
        'version'  : remote.version(request.session['token']),
        'username' : username
    }))
@@ -69,7 +89,7 @@ def error_page(request,message):
    t = get_template('error_page.tmpl')
    message = message.replace("<Fault 1: \"<class 'cobbler.cexceptions.CX'>:'","Remote exception: ")
    message = message.replace("'\">","")
-   html = t.render(Context({
+   html = t.render(RequestContext(request,{
        'version' : remote.version(request.session['token']),
        'message' : message,
        'username': username
@@ -275,7 +295,7 @@ def genlist(request, what, page=None):
     Lists all object types, complete with links to actions
     on those objects.
     """
-    if not test_user_authenticated(request): return login(request)
+    if not test_user_authenticated(request): return login(request, next="/cobbler_web/%s/list" % what)
 
     # get details from the session
     if page == None:
@@ -296,11 +316,17 @@ def genlist(request, what, page=None):
 
     if what == "distro":
        columns = [ "name" ]
+       batchactions += [
+           ["Build ISO","buildiso","enable"],
+       ]
     if what == "profile":
        columns = [ "name", "distro" ]
+       batchactions += [
+           ["Build ISO","buildiso","enable"],
+       ]
     if what == "system":
        # FIXME: also list network, once working
-       columns = [ "name", "profile", "netboot_enabled" ]
+       columns = [ "name", "profile", "status", "netboot_enabled" ]
        batchactions += [
            ["Power on","power","on"],
            ["Power off","power","off"],
@@ -308,6 +334,7 @@ def genlist(request, what, page=None):
            ["Change profile","profile",""],
            ["Netboot enable","netboot","enable"],
            ["Netboot disable","netboot","disable"],
+           ["Build ISO","buildiso","enable"],
        ]
     if what == "repo":
        columns = [ "name", "mirror" ]
@@ -340,7 +367,8 @@ def genlist(request, what, page=None):
     }))
     return HttpResponse(html)
 
-
+@require_POST
+@csrf_protect
 def modify_list(request, what, pref, value=None):
     """
     This function is used in the generic list view
@@ -350,7 +378,7 @@ def modify_list(request, what, pref, value=None):
     This function modifies the session object to
     store these preferences persistently.
     """
-    if not test_user_authenticated(request): return login(request)
+    if not test_user_authenticated(request): return login(request, next="/cobbler_web/%s/modifylist/%s/%s" % (what,pref,str(value)))
 
 
     # what preference are we tweaking?
@@ -407,12 +435,14 @@ def modify_list(request, what, pref, value=None):
 
 # ======================================================================
 
+@require_POST
+@csrf_protect
 def generic_rename(request, what, obj_name=None, obj_newname=None):
 
    """
    Renames an object.
    """
-   if not test_user_authenticated(request): return login(request)
+   if not test_user_authenticated(request): return login(request, next="/cobbler_web/%s/rename/%s/%s" % (what,obj_name,obj_newname))
 
    if obj_name == None:
       return error_page(request,"You must specify a %s to rename" % what)
@@ -427,11 +457,13 @@ def generic_rename(request, what, obj_name=None, obj_newname=None):
 
 # ======================================================================
 
+@require_POST
+@csrf_protect
 def generic_copy(request, what, obj_name=None, obj_newname=None):
    """
    Copies an object.
    """
-   if not test_user_authenticated(request): return login(request)
+   if not test_user_authenticated(request): return login(request, next="/cobbler_web/%s/copy/%s/%s" % (what,obj_name,obj_newname))
    # FIXME: shares all but one line with rename, merge it.
    if obj_name == None:
       return error_page(request,"You must specify a %s to rename" % what)
@@ -446,11 +478,13 @@ def generic_copy(request, what, obj_name=None, obj_newname=None):
 
 # ======================================================================
 
+@require_POST
+@csrf_protect
 def generic_delete(request, what, obj_name=None):
    """
    Deletes an object.
    """
-   if not test_user_authenticated(request): return login(request)
+   if not test_user_authenticated(request): return login(request, next="/cobbler_web/%s/delete/%s" % (what,obj_name))
    # FIXME: consolidate code with above functions.
    if obj_name == None:
       return error_page(request,"You must specify a %s to delete" % what)
@@ -465,13 +499,15 @@ def generic_delete(request, what, obj_name=None):
 
 # ======================================================================
 
+@require_POST
+@csrf_protect
 def generic_domulti(request, what, multi_mode=None, multi_arg=None):
 
     """
     Process operations like profile reassignment, netboot toggling, and deletion
     which occur on all items that are checked on the list page.
     """
-    if not test_user_authenticated(request): return login(request)
+    if not test_user_authenticated(request): return login(request, next="/cobbler_web/%s/multi/%s/%s" % (what,multi_mode,multi_arg))
 
     # FIXME: cleanup
     # FIXME: COMMENTS!!!11111???
@@ -513,6 +549,17 @@ def generic_domulti(request, what, multi_mode=None, multi_arg=None):
             return error_page(request,"Cannot modify systems without specifying power option")
         options = { "systems" : names, "power" : power }
         remote.background_power_system(options, request.session['token'])
+    elif what == "system" and multi_mode == "buildiso":
+        options = { "systems" : names, "profiles" : [] }
+        remote.background_buildiso(options, request.session['token'])
+    elif what == "profile" and multi_mode == "buildiso":
+        options = { "profiles" : names, "systems" : [] }
+        remote.background_buildiso(options, request.session['token'])
+    elif what == "distro" and multi_mode == "buildiso":
+        if len(names) > 1:
+            return error_page(request,"You can only select one distro at a time to build an ISO for")
+        options = { "standalone" : True, "distro": str(names[0]) }
+        remote.background_buildiso(options, request.session['token'])
     elif what == "profile" and multi_mode == "reposync":
         options = { "repos" : names, "tries" : 3 }
         remote.background_reposync(options,request.session['token'])
@@ -525,9 +572,9 @@ def generic_domulti(request, what, multi_mode=None, multi_arg=None):
 # ======================================================================
 
 def import_prompt(request):
-   if not test_user_authenticated(request): return login(request)
+   if not test_user_authenticated(request): return login(request, next="/cobbler_web/import/prompt")
    t = get_template('import.tmpl')
-   html = t.render(Context({
+   html = t.render(RequestContext(request,{
        'version'  : remote.version(request.session['token']),
        'username' : username,
    }))
@@ -539,10 +586,10 @@ def check(request):
    """
    Shows a page with the results of 'cobbler check'
    """
-   if not test_user_authenticated(request): return login(request)
+   if not test_user_authenticated(request): return login(request, next="/cobbler_web/check")
    results = remote.check(request.session['token'])
    t = get_template('check.tmpl')
-   html = t.render(Context({
+   html = t.render(RequestContext(request,{
        'version': remote.version(request.session['token']),
        'username' : username,
        'results'  : results
@@ -551,15 +598,19 @@ def check(request):
 
 # ======================================================================
 
+@require_POST
+@csrf_protect
 def buildiso(request):
-    if not test_user_authenticated(request): return login(request)
+    if not test_user_authenticated(request): return login(request, next="/cobbler_web/buildiso")
     remote.background_buildiso({},request.session['token'])
     return HttpResponseRedirect('/cobbler_web/task_created')
 
 # ======================================================================
 
+@require_POST
+@csrf_protect
 def import_run(request):
-    if not test_user_authenticated(request): return login(request)
+    if not test_user_authenticated(request): return login(request, next="/cobbler_web/import/prompt")
     options = {
         "name"  : request.POST.get("name",""),
         "path"  : request.POST.get("path",""),
@@ -575,7 +626,7 @@ def ksfile_list(request, page=None):
    """
    List all kickstart templates and link to their edit pages.
    """
-   if not test_user_authenticated(request): return login(request)
+   if not test_user_authenticated(request): return login(request, next="/cobbler_web/ksfile/list")
    ksfiles = remote.get_kickstart_templates(request.session['token'])
 
    ksfile_list = []
@@ -588,7 +639,7 @@ def ksfile_list(request, page=None):
          ksfile_list.append((ksfile,ksfile,None))
 
    t = get_template('ksfile_list.tmpl')
-   html = t.render(Context({
+   html = t.render(RequestContext(request,{
        'what':'ksfile',
        'ksfiles': ksfile_list,
        'version': remote.version(request.session['token']),
@@ -599,12 +650,12 @@ def ksfile_list(request, page=None):
 
 # ======================================================================
 
-
+@csrf_protect
 def ksfile_edit(request, ksfile_name=None, editmode='edit'):
    """
    This is the page where a kickstart file is edited.
    """
-   if not test_user_authenticated(request): return login(request)
+   if not test_user_authenticated(request): return login(request, next="/cobbler_web/ksfile/edit/file:%s" % ksfile_name)
    if editmode == 'edit':
       editable = False
    else:
@@ -617,7 +668,7 @@ def ksfile_edit(request, ksfile_name=None, editmode='edit'):
       ksdata = remote.read_or_write_kickstart_template(ksfile_name, True, "", request.session['token'])
 
    t = get_template('ksfile_edit.tmpl')
-   html = t.render(Context({
+   html = t.render(RequestContext(request,{
        'ksfile_name' : ksfile_name,
        'deleteable'  : deleteable,
        'ksdata'      : ksdata,
@@ -630,11 +681,13 @@ def ksfile_edit(request, ksfile_name=None, editmode='edit'):
 
 # ======================================================================
 
+@require_POST
+@csrf_protect
 def ksfile_save(request):
    """
    This page processes and saves edits to a kickstart file.
    """
-   if not test_user_authenticated(request): return login(request)
+   if not test_user_authenticated(request): return login(request, next="/cobbler_web/ksfile/list")
    # FIXME: error checking
 
    editmode = request.POST.get('editmode', 'edit')
@@ -662,7 +715,7 @@ def snippet_list(request, page=None):
    """
    This page lists all available snippets and has links to edit them.
    """
-   if not test_user_authenticated(request): return login(request)
+   if not test_user_authenticated(request): return login(request, next="/cobbler_web/snippet/list")
    snippets = remote.get_snippets(request.session['token'])
 
    snippet_list = []
@@ -673,7 +726,7 @@ def snippet_list(request, page=None):
          snippet_list.append((snippet,snippet,None))
 
    t = get_template('snippet_list.tmpl')
-   html = t.render(Context({
+   html = t.render(RequestContext(request,{
        'what'     : 'snippet',
        'snippets' : snippet_list,
        'version'  : remote.version(request.session['token']),
@@ -683,11 +736,12 @@ def snippet_list(request, page=None):
 
 # ======================================================================
 
+@csrf_protect
 def snippet_edit(request, snippet_name=None, editmode='edit'):
    """
    This page edits a specific snippet.
    """
-   if not test_user_authenticated(request): return login(request)
+   if not test_user_authenticated(request): return login(request, next="/cobbler_web/edit/file:%s" % snippet_name)
    if editmode == 'edit':
       editable = False
    else:
@@ -700,7 +754,7 @@ def snippet_edit(request, snippet_name=None, editmode='edit'):
       snippetdata = remote.read_or_write_snippet(snippet_name, True, "", request.session['token'])
 
    t = get_template('snippet_edit.tmpl')
-   html = t.render(Context({
+   html = t.render(RequestContext(request,{
        'snippet_name' : snippet_name,
        'deleteable'   : deleteable,
        'snippetdata'  : snippetdata,
@@ -713,11 +767,13 @@ def snippet_edit(request, snippet_name=None, editmode='edit'):
 
 # ======================================================================
 
+@require_POST
+@csrf_protect
 def snippet_save(request):
    """
    This snippet saves a snippet once edited.
    """
-   if not test_user_authenticated(request): return login(request)
+   if not test_user_authenticated(request): return login(request, next="/cobbler_web/snippet/list")
    # FIXME: error checking
 
    editmode = request.POST.get('editmode', 'edit')
@@ -727,7 +783,8 @@ def snippet_save(request):
    if snippet_name == None:
       return HttpResponse("NO SNIPPET NAME SPECIFIED")
    if editmode != 'edit':
-      snippet_name = "/var/lib/cobbler/snippets/" + snippet_name
+      if snippet_name.find("/var/lib/cobbler/snippets/") != 0:
+          snippet_name = "/var/lib/cobbler/snippets/" + snippet_name
 
    delete1   = request.POST.get('delete1', None)
    delete2   = request.POST.get('delete2', None)
@@ -745,7 +802,7 @@ def settings(request):
    """
    This page presents a list of all the settings to the user.  They are not editable.
    """
-   if not test_user_authenticated(request): return login(request)
+   if not test_user_authenticated(request): return login(request, next="/cobbler_web/settings")
    settings = remote.get_settings()
    skeys = settings.keys()
    skeys.sort()
@@ -755,7 +812,7 @@ def settings(request):
       results.append([k,settings[k]])
 
    t = get_template('settings.tmpl')
-   html = t.render(Context({
+   html = t.render(RequestContext(request,{
         'settings' : results,
         'version'  : remote.version(request.session['token']),
         'username' : username,
@@ -768,7 +825,7 @@ def events(request):
    """
    This page presents a list of all the events and links to the event log viewer.
    """
-   if not test_user_authenticated(request): return login(request)
+   if not test_user_authenticated(request): return login(request, next="/cobbler_web/events")
    events = remote.get_events()
 
    events2 = []
@@ -781,7 +838,7 @@ def events(request):
    events2.sort(sorter)
 
    t = get_template('events.tmpl')
-   html = t.render(Context({
+   html = t.render(RequestContext(request,{
        'results'  : events2,
        'version'  : remote.version(request.session['token']),
        'username' : username
@@ -794,7 +851,7 @@ def eventlog(request, event=0):
    """
    Shows the log for a given event.
    """
-   if not test_user_authenticated(request): return login(request)
+   if not test_user_authenticated(request): return login(request, next="/cobbler_web/eventlog/%s" % str(event))
    event_info = remote.get_events()
    if not event_info.has_key(event):
       return HttpResponse("event not found")
@@ -815,7 +872,7 @@ def eventlog(request, event=0):
       'version'    : remote.version(request.session['token']),
       'username'  : username
    }
-   html = t.render(Context(vars))
+   html = t.render(RequestContext(request,vars))
    return HttpResponse(html)
 
 # ======================================================================
@@ -831,36 +888,44 @@ def random_mac(request, virttype="xenpv"):
 
 # ======================================================================
 
+@require_POST
+@csrf_protect
 def sync(request):
    """
    Runs 'cobbler sync' from the API when the user presses the sync button.
    """
-   if not test_user_authenticated(request): return login(request)
+   if not test_user_authenticated(request): return login(request, next="/cobbler_web/sync")
    remote.background_sync({"verbose":"True"},request.session['token'])
    return HttpResponseRedirect("/cobbler_web/task_created")
 
 # ======================================================================
 
+@require_POST
+@csrf_protect
 def reposync(request):
    """
    Syncs all repos that are configured to be synced.
    """
-   if not test_user_authenticated(request): return login(request)
+   if not test_user_authenticated(request): return login(request, next="/cobbler_web/reposync")
    remote.background_reposync({ "names":"", "tries" : 3},request.session['token'])
    return HttpResponseRedirect("/cobbler_web/task_created")
 
 # ======================================================================
 
+@require_POST
+@csrf_protect
 def hardlink(request):
    """
    Hardlinks files between repos and install trees to save space.
    """
-   if not test_user_authenticated(request): return login(request)
+   if not test_user_authenticated(request): return login(request, next="/cobbler_web/hardlink")
    remote.background_hardlink({},request.session['token'])
    return HttpResponseRedirect("/cobbler_web/task_created")
 
 # ======================================================================
 
+@require_POST
+@csrf_protect
 def replicate(request):
    """
    Replicate configuration from the central cobbler server, configured
@@ -873,7 +938,7 @@ def replicate(request):
    #settings = remote.get_settings()
    #options = settings # just load settings from file until we decide to ask user (later?)
    #remote.background_replicate(options, request.session['token'])
-   if not test_user_authenticated(request): return login(request)
+   if not test_user_authenticated(request): return login(request, next="/cobbler_web/replicate")
    return HttpResponseRedirect("/cobbler_web/task_created")
 
 # ======================================================================
@@ -893,13 +958,17 @@ def __names_from_dicts(loh,optional=True):
 
 # ======================================================================
 
+@csrf_protect
 def generic_edit(request, what=None, obj_name=None, editmode="new"):
 
    """
    Presents an editor page for any type of object.
    While this is generally standardized, systems are a little bit special.
    """
-   if not test_user_authenticated(request): return login(request)
+   target = ""
+   if obj_name != None:
+       target = "/%s" % obj_name
+   if not test_user_authenticated(request): return login(request, next="/cobbler_web/%s/edit%s" % (what,target))
 
    obj = None
 
@@ -952,13 +1021,14 @@ def generic_edit(request, what=None, obj_name=None, editmode="new"):
    if what in ("distro","profile","system"):
        __tweak_field(fields, "mgmt_classes", "choices", __names_from_dicts(remote.get_mgmtclasses(),optional=False))
 
-   # save the fields in the session for comparison later
-   request.session['%s_%s' % (what,obj_name)] = fields
+   # if editing save the fields in the session for comparison later
+   if editmode == "edit":
+       request.session['%s_%s' % (what,obj_name)] = fields
 
    t = get_template('generic_edit.tmpl')
    inames = interfaces.keys()
    inames.sort()
-   html = t.render(Context({
+   html = t.render(RequestContext(request,{
        'what'            : what, 
        'fields'          : fields, 
        'subobject'       : child,
@@ -976,12 +1046,14 @@ def generic_edit(request, what=None, obj_name=None, editmode="new"):
 
 # ======================================================================
 
+@require_POST
+@csrf_protect
 def generic_save(request,what):
 
     """
     Saves an object back using the cobbler API after clearing any 'generic_edit' page.
     """
-    if not test_user_authenticated(request): return login(request)
+    if not test_user_authenticated(request): return login(request, next="/cobbler_web/%s/list" % what)
 
     # load request fields and see if they are valid
     editmode  = request.POST.get('editmode', 'edit')
@@ -997,7 +1069,7 @@ def generic_save(request,what):
         return error_page(request,"Required field name is missing")
               
     prev_fields = []
-    if request.session.has_key("%s_%s" % (what,obj_name)):
+    if request.session.has_key("%s_%s" % (what,obj_name)) and editmode == "edit":
         prev_fields = request.session["%s_%s" % (what,obj_name)]
 
     # grab the remote object handle
@@ -1124,9 +1196,12 @@ def test_user_authenticated(request):
             pass
     return False
 
+@csrf_protect
 def login(request, next=None):
-    return render_to_response('login.tmpl', {'next':next})
+    return render_to_response('login.tmpl', RequestContext(request,{'next':next}))
 
+@require_POST
+@csrf_protect
 def do_login(request):
     global remote
     global username
@@ -1156,6 +1231,8 @@ def do_login(request):
     else:
         return login(request,nextsite)
 
+@require_POST
+@csrf_protect
 def do_logout(request):
     request.session['username'] = ""
     request.session['token'] = ""

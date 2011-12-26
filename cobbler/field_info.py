@@ -50,10 +50,11 @@ USES_SELECT = [
    "image",
    "virt_type",
    "arch",
-   "*bonding",
+   "*interface_type",
    "parent",
    "breed",
    "os_version",
+   "status",
 ]
 
 # fields that should use the checkbox in the web app
@@ -93,6 +94,7 @@ BLOCK_MAPPINGS = {
    "virt_bridge"     : "Virtualization",
    "virt_path"       : "Virtualization",
    "virt_file_size"  : "Virtualization",
+   "virt_disk_driver": "Virtualization",
    "virt_type"       : "Virtualization",
    "virt_auto_boot"  : "Virtualization",
    "virt_host"       : "Virtualization",
@@ -105,6 +107,7 @@ BLOCK_MAPPINGS = {
    "*virt_bridge"    : "Networking",
    "*virt_type"      : "Virtualization",
    "*virt_file_size" : "Virtualization",
+   "*virt_disk_driver" : "Virtualization",
    "power_id"        : "Power",
    "power_address"   : "Power",
    "power_user"      : "Power",
@@ -115,17 +118,19 @@ BLOCK_MAPPINGS = {
    "broadcast"       : "Networking", # ..
    "reserved"        : "Networking", # ..
    "*mac_address"    : "Networking",
+   "network_widget_c": "Networking",
    "*mtu"            : "Networking",
    "*ip_address"     : "Networking",
    "*dhcp_tag"       : "Networking",
    "*static"         : "Networking",
-   "*bonding"        : "Networking",
+   "*interface_type" : "Networking",
+   "*interface_master" : "Networking",
    "*bonding_opts"   : "Networking",
-   "*bonding_master" : "Networking",
+   "*bridge_opts"    : "Networking",
    "*management"     : "Networking",
    "*dns_name"       : "Networking",
    "*static_routes"  : "Networking",
-   "*subnet"         : "Networking",
+   "*netmask"        : "Networking",
    "*ipv6_address"   : "Networking",
    "*ipv6_secondaries"      : "Networking",
    "*ipv6_mtu"              : "Networking",
@@ -137,6 +142,7 @@ BLOCK_MAPPINGS = {
    "name_servers_search"    : "Networking (Global)",
    "ipv6_default_device"    : "Networking (Global)",
    "ipv6_autoconfiguration" : "Networking (Global)",
+   "proxy"                  : "General",
    "repos"                  : "General",
    "dhcp_tag"               : "Advanced",
    "mgmt_classes"           : "Management",
@@ -169,4 +175,13 @@ ALTERNATE_OPTIONS = {
    "ks_meta"             : "--ksmeta",
    "kernel_options"      : "--kopts",
    "kernel_options_post" : "--kopts-post",
+}
+
+# Deprecated fields that have been renamed, but we need to account for them appearing in older 
+# datastructs that may not have been saved since the code change
+
+DEPRECATED_FIELDS = {
+   "subnet"         : "netmask",
+   "bonding"        : "interface_type",
+   "bonding_master" : "interface_master",
 }

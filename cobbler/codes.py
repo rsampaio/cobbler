@@ -37,18 +37,19 @@ import utils
 # the rest are undefined (for now), this will evolve.
 
 VALID_OS_BREEDS = [
-    "redhat", "debian", "ubuntu", "suse", "generic", "windows", "unix", "vmware", "other"
+    "redhat", "debian", "ubuntu", "suse", "generic", "windows", "unix", "vmware", "freebsd", "other"
 ]
 
 VALID_OS_VERSIONS = {
-    "redhat"  : [ "rhel3", "rhel4", "rhel5", "rhel6", "fedora14", "fedora15", "generic24", "generic26", "virtio26", "other" ],
-    "suse"    : [ "sles9", "sles10", "sles11", "generic24", "generic26", "virtio26", "other" ],
+    "redhat"  : [ "rhel3", "rhel4", "rhel5", "rhel6", "fedora14", "fedora15", "fedora16", "rawhide", "generic24", "generic26", "virtio26", "other" ],
+    "suse"    : [ "sles9", "sles10", "sles11", "opensuse11.2", "opensuse11.3", "opensuse11.4", "opensuse12.1", "generic24", "generic26", "virtio26", "other" ],
     "debian"  : [ "lenny", "squeeze", "stable", "testing", "unstable", "generic24", "generic26", "other" ],
     "ubuntu"  : [ "hardy", "lucid", "maverick", "natty" ],
     "generic" : [ "generic24", "generic26", "other" ],
     "windows" : [ "winxp", "win2k", "win2k3", "vista", "other" ],
-    "unix"    : [ "solaris9", "solaris10", "freebsd7", "freebsd8", "other" ],
+    "unix"    : [ "solaris9", "solaris10", "other" ],
     "vmware"  : [ "esx4", "esxi4" ],
+    "freebsd" : [ "7.3", "7.4", "8.1", "8.2", "9.0" ],
     "other"   : [ "msdos", "netware4", "netware5", "netware6", "generic", "other" ]
 }
 

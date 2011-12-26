@@ -9,7 +9,7 @@ except:
     import cobbler.sub_process as subprocess
 
 
-VERSION = "2.1.0"
+VERSION = "2.3.1"
 OUTPUT_DIR = "config"
 
 
@@ -188,6 +188,7 @@ if __name__ == "__main__":
             #Configuration
             ("%s" % etcpath,                ["config/*"]),
             ("%s" % etcpath,                ["templates/etc/*"]),
+            ("%siso" % etcpath,             ["templates/iso/*"]),
             ("%spxe" % etcpath,             ["templates/pxe/*"]),
             ("%sreporting" % etcpath,       ["templates/reporting/*"]),
             ("%spower" % etcpath,           ["templates/power/*"]),
@@ -261,6 +262,7 @@ if __name__ == "__main__":
             ("%scobbler/ks_mirror/config" % webroot,    []),
             ("%scobbler/links" % webroot,               []),
             ("%scobbler/aux" % webroot,                 []),
+            ("%scobbler/pub" % webroot,                 []),
 
             #A script that isn't really data, wsgi script
             ("%scobbler/svc/" % webroot,     ["scripts/services.py"]),

@@ -34,9 +34,11 @@ FIELDS = [
   ["owners","SETTINGS:default_ownership",0,"Owners",True,"Owners list for authz_ownership (space delimited)",0,"list"],
   ["profile",None,0,"Profile",True,"Parent profile",[],"str"],
   ["image",None,0,"Image",True,"Parent image (if not a profile)",0,"str"],
+  ["status","production",0,"Status",True,"System status",["development","testing","acceptance","production"],"str"],
   ["kernel_options",{},0,"Kernel Options",True,"Ex: selinux=permissive",0,"dict"],
   ["kernel_options_post",{},0,"Kernel Options (Post Install)",True,"Ex: clocksource=pit noapic",0,"dict"],
   ["ks_meta",{},0,"Kickstart Metadata",True,"Ex: dog=fang agent=86",0,"dict"],
+  ["proxy","<<inherit>>",0,"Proxy",True,"Proxy URL",0,"str"],
   ["netboot_enabled",True,0,"Netboot Enabled",True,"PXE (re)install this machine at next boot?",0,"bool"],
   ["kickstart","<<inherit>>",0,"Kickstart",True,"Path to kickstart template",0,"str"],
   ["comment","",0,"Comment",True,"Free form text description",0,"str"],
@@ -46,6 +48,7 @@ FIELDS = [
   ["virt_type","<<inherit>>",0,"Virt Type",True,"Virtualization technology to use",["xenpv","xenfv","qemu","vmware"],"str"],
   ["virt_cpus","<<inherit>>",0,"Virt CPUs",True,"",0,"int"],
   ["virt_file_size","<<inherit>>",0,"Virt File Size(GB)",True,"",0,"float"],
+  ["virt_disk_driver","<<inherit>>",0,"Virt Disk Driver Type",True,"The on-disk format for the virtualization disk","raw","str"],
   ["virt_ram","<<inherit>>",0,"Virt RAM (MB)",True,"",0,"int"],
   ["virt_auto_boot","<<inherit>>",0,"Virt Auto Boot",True,"Auto boot this VM?",0,"bool"],
   ["ctime",0,0,"",False,"",0,"float"],
@@ -64,14 +67,16 @@ FIELDS = [
   ["network_widget_a","",0,"Add Interface",True,"",0,"str"], # not a real field, a marker for the web app
   ["network_widget_b","",0,"Edit Interface",True,"",0,"str"], # not a real field, a marker for the web app
   ["*mac_address","",0,"MAC Address",True,"(Place \"random\" in this field for a random MAC Address.)",0,"str"],
+  ["network_widget_c","",0,"",True,"",0,"str"], # not a real field, a marker for the web app
   ["*mtu","",0,"MTU",True,"",0,"str"],
   ["*ip_address","",0,"IP Address",True,"",0,"str"],
-  ["*bonding","na",0,"Bonding Mode",True,"",["na","master","slave"],"str"],
-  ["*bonding_master","",0,"Bonding Master",True,"",0,"str"],
+  ["*interface_type","na",0,"Interface Type",True,"",["na","master","slave","bond","bond_slave","bridge","bridge_slave"],"str"],
+  ["*interface_master","",0,"Master Interface",True,"",0,"str"],
   ["*bonding_opts","",0,"Bonding Opts",True,"",0,"str"],
+  ["*bridge_opts","",0,"Bridge Opts",True,"",0,"str"],
   ["*management",False,0,"Management Interface",True,"Is this the management interface?",0,"bool"],
   ["*static",False,0,"Static",True,"Is this interface static?",0,"bool"],
-  ["*subnet","",0,"Subnet",True,"",0,"str"],
+  ["*netmask","",0,"Subnet Mask",True,"",0,"str"],
   ["*dhcp_tag","",0,"DHCP Tag",True,"",0,"str"],
   ["*dns_name","",0,"DNS Name",True,"",0,"str"],
   ["*static_routes",[],0,"Static Routes",True,"",0,"list"],
@@ -129,23 +134,27 @@ class System(item.Item):
 
         if not self.interfaces.has_key(name):
             self.interfaces[name] = {
-                "mac_address"    : "",
-                "mtu"            : "",
-                "ip_address"     : "",
-                "dhcp_tag"       : "",
-                "subnet"         : "",
-                "virt_bridge"    : "",
-                "static"         : False,
-                "bonding"        : "",
-                "bonding_master" : "",
-                "bonding_opts"   : "",
-                "management"     : False,
-                "dns_name"       : "",
-                "static_routes"  : [],
-                "ipv6_address"   : "",
-                "ipv6_secondaries"  : [],
-                "ipv6_mtu"       : "",
-                "ipv6_static_routes"  : [],
+                "mac_address"          : "",
+                "mtu"                  : "",
+                "ip_address"           : "",
+                "dhcp_tag"             : "",
+                "subnet"               : "", # deprecated
+                "netmask"              : "",
+                "virt_bridge"          : "",
+                "static"               : False,
+                "interface_type"       : "",
+                "interface_master"     : "",
+                "bonding"              : "", # deprecated
+                "bonding_master"       : "", # deprecated
+                "bonding_opts"         : "",
+                "bridge_opts"          : "",
+                "management"           : False,
+                "dns_name"             : "",
+                "static_routes"        : [],
+                "ipv6_address"         : "",
+                "ipv6_secondaries"     : [],
+                "ipv6_mtu"             : "",
+                "ipv6_static_routes"   : [],
                 "ipv6_default_gateway" : "",
             }
 
@@ -210,6 +219,12 @@ class System(item.Item):
         if server is None or server == "":
             server = "<<inherit>>"
         self.server = server
+        return True
+
+    def set_proxy(self,proxy):
+        if proxy is None or proxy == "":
+            proxy = "<<inherit>>"
+        self.proxy = proxy
         return True
 
     def get_mac_address(self,interface):
@@ -288,6 +303,10 @@ class System(item.Item):
         self.hostname = hostname
         return True
 
+    def set_status(self,status):
+        self.status = status
+        return True
+
     def set_static(self,truthiness,interface):
         intf = self.__get_interface(interface)
         intf["static"] = utils.input_boolean(truthiness)
@@ -361,9 +380,9 @@ class System(item.Item):
         self.name_servers_search = data
         return True
 
-    def set_subnet(self,subnet,interface):
+    def set_netmask(self,netmask,interface):
         intf = self.__get_interface(interface)
-        intf["subnet"] = subnet
+        intf["netmask"] = netmask
         return True
     
     def set_virt_bridge(self,bridge,interface):
@@ -373,23 +392,35 @@ class System(item.Item):
         intf["virt_bridge"] = bridge
         return True
 
-    def set_bonding(self,bonding,interface):
-        if bonding not in ["master","slave","na",""] : 
-            raise CX(_("bonding value must be one of: master, slave, na"))
-        if bonding == "na":
-            bonding = ""
+    def set_interface_type(self,type,interface):
+        # master and slave are deprecated, and will
+        # be assumed to mean bonding slave/master
+        interface_types = ["bridge","bridge_slave","bond","bond_slave","master","slave","na",""]
+        if type not in interface_types:
+            raise CX(_("interface type value must be one of: %s or blank" % interface_types.join(",")))
+        if type == "na":
+            type = ""
+        elif type == "master":
+            type = "bond"
+        elif type == "slave":
+            type = "bond_slave"
         intf = self.__get_interface(interface)
-        intf["bonding"] = bonding
+        intf["interface_type"] = type
         return True
 
-    def set_bonding_master(self,bonding_master,interface):
+    def set_interface_master(self,interface_master,interface):
         intf = self.__get_interface(interface)
-        intf["bonding_master"] = bonding_master
+        intf["interface_master"] = interface_master
         return True
 
     def set_bonding_opts(self,bonding_opts,interface):
         intf = self.__get_interface(interface)
         intf["bonding_opts"] = bonding_opts
+        return True
+
+    def set_bridge_opts(self,bridge_opts,interface):
+        intf = self.__get_interface(interface)
+        intf["bridge_opts"] = bridge_opts
         return True
 
     def set_ipv6_autoconfiguration(self,truthiness):
@@ -507,6 +538,9 @@ class System(item.Item):
 
     def set_virt_file_size(self,num):
         return utils.set_virt_file_size(self,num)
+
+    def set_virt_disk_driver(self,driver):
+        return utils.set_virt_disk_driver(self,driver)
  
     def set_virt_auto_boot(self,num):
         return utils.set_virt_auto_boot(self,num)
@@ -610,11 +644,15 @@ class System(item.Item):
             if field == "dnsname"             : self.set_dns_name(value, interface)
             if field == "static"              : self.set_static(value, interface)
             if field == "dhcptag"             : self.set_dhcp_tag(value, interface)
-            if field == "subnet"              : self.set_subnet(value, interface)
+            if field == "netmask"             : self.set_netmask(value, interface)
+            if field == "subnet"              : self.set_netmask(value, interface)
             if field == "virtbridge"          : self.set_virt_bridge(value, interface)
-            if field == "bonding"             : self.set_bonding(value, interface)
-            if field == "bondingmaster"       : self.set_bonding_master(value, interface)
+            if field == "interfacetype"       : self.set_interface_type(value, interface)
+            if field == "interfacemaster"     : self.set_interface_master(value, interface)
+            if field == "bonding"             : self.set_interface_type(value, interface)   # deprecated
+            if field == "bondingmaster"       : self.set_interface_master(value, interface) # deprecated
             if field == "bondingopts"         : self.set_bonding_opts(value, interface)
+            if field == "bridgeopts"          : self.set_bridge_opts(value, interface)
             if field == "management"          : self.set_management(value, interface)
             if field == "staticroutes"        : self.set_static_routes(value, interface)
             if field == "ipv6address"         : self.set_ipv6_address(value, interface)

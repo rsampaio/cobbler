@@ -57,7 +57,6 @@ import re
 import sys
 import xmlrpclib
 import string
-import re
 import glob
 import socket
 import utils
@@ -79,7 +78,12 @@ DISPLAY_PARAMS = [
    "netboot_enabled",
    "kernel_options",
    "repos",
-   "virt_ram","virt_disk","virt_type", "virt_path", "virt_auto_boot"
+   "virt_ram",
+   "virt_disk",
+   "virt_disk_driver",
+   "virt_type",
+   "virt_path",
+   "virt_auto_boot",
 ]
 
 
@@ -153,7 +157,7 @@ def main():
                  help="use static network configuration from this interface while installing")
     p.add_option("-t", "--port",
                  dest="port",
-                 help="cobbler xmlrpc port (default 25151)")
+                 help="cobbler port (default 80)")
     p.add_option("-w", "--vm-poll",
                  dest="should_poll",
                  action="store_true",
@@ -197,7 +201,10 @@ def main():
                  help="When used with  --replace-self, embed the kickstart in the initrd to overcome potential DHCP timeout issues. (seldom needed)")
     p.add_option("", "--qemu-disk-type",
                  dest="qemu_disk_type",
-                 help="when used with --virt_type=qemu, add select of disk drivers: ide,scsi,virtio")
+                 help="when used with --virt_type=qemu, add select of disk driver types: ide,scsi,virtio")
+    p.add_option("", "--qemu-net-type",
+                 dest="qemu_net_type",
+                 help="when used with --virt_type=qemu, select type of network device to use: e1000, ne2k_pci, pcnet, rtl8139, virtio")
 
     (options, args) = p.parse_args()
 
@@ -229,6 +236,7 @@ def main():
         k.embed_kickstart     = options.embed_kickstart
         k.virt_auto_boot      = options.virt_auto_boot
         k.qemu_disk_type      = options.qemu_disk_type
+        k.qemu_net_type       = options.qemu_net_type
 
         if options.virt_name is not None:
             k.virt_name          = options.virt_name
@@ -286,6 +294,7 @@ class Koan:
         self.virt_path         = None
         self.force_path        = None
         self.qemu_disk_type    = None
+        self.qemu_net_type     = None
         self.virt_auto_boot    = None
 
         # This option adds the --copy-default argument to /sbin/grubby
@@ -358,6 +367,12 @@ class Koan:
             self.qemu_disk_type = self.qemu_disk_type.lower()
             if self.virt_type not in [ "qemu", "auto" ]:
                raise InfoException, "--qemu-disk-type must use with --virt-type=qemu"
+
+        # if --qemu-net-type was called without --virt-type=qemu, then fail
+        if (self.qemu_net_type is not None):
+            self.qemu_net_type = self.qemu_net_type.lower()
+            if self.virt_type not in [ "qemu", "auto" ]:
+               raise InfoException, "--qemu-net-type must use with --virt-type=qemu"
 
 
 
@@ -1157,9 +1172,9 @@ class Koan:
 
         if self.server:
             if kernel[0] == "/":
-                kernel = "http://%s/cobbler/images/%s/%s" % (self.server, distro, kernel_short)
+                kernel = "http://%s/cobbler/images/%s/%s" % (profile_data["http_server"], distro, kernel_short)
             if initrd[0] == "/":
-                initrd = "http://%s/cobbler/images/%s/%s" % (self.server, distro, initrd_short)
+                initrd = "http://%s/cobbler/images/%s/%s" % (profile_data["http_server"], distro, initrd_short)
 
         try:
             print "downloading initrd %s to %s" % (initrd_short, initrd_save)
@@ -1210,14 +1225,14 @@ class Koan:
                 interface_data = self.safe_load(interfaces, interface_name)
 
             ip = self.safe_load(interface_data, "ip_address")
-            subnet = self.safe_load(interface_data, "subnet")
+            netmask = self.safe_load(interface_data, "netmask")
             gateway = self.safe_load(pd, "gateway")
 
             hashv["ksdevice"] = self.static_interface
             if ip is not None:
                 hashv["ip"] = ip
-            if subnet is not None:
-                hashv["netmask"] = subnet
+            if netmask is not None:
+                hashv["netmask"] = netmask
             if gateway is not None:
                 hashv["gateway"] = gateway
 
@@ -1254,7 +1269,8 @@ class Koan:
         vcpus               = self.calc_virt_cpus(pd)
         path_list           = self.calc_virt_path(pd, virtname)
         size_list           = self.calc_virt_filesize(pd)
-        disks               = self.merge_disk_data(path_list,size_list)
+        driver_list         = self.calc_virt_drivers(pd)
+        disks               = self.merge_disk_data(path_list,size_list,driver_list)
         virt_auto_boot      = self.calc_virt_autoboot(pd, self.virt_auto_boot)
 
         results = create_func(
@@ -1271,7 +1287,8 @@ class Koan:
                 bridge           =  self.virt_bridge,
                 virt_type        =  self.virt_type,
                 virt_auto_boot   =  virt_auto_boot,
-                qemu_driver_type =  self.qemu_disk_type
+                qemu_driver_type =  self.qemu_disk_type,
+                qemu_net_type    =  self.qemu_net_type
         )
 
         print results
@@ -1362,7 +1379,7 @@ class Koan:
 
     #---------------------------------------------------
 
-    def merge_disk_data(self, paths, sizes):
+    def merge_disk_data(self, paths, sizes, drivers):
         counter = 0
         disks = []
         for p in paths:
@@ -1371,11 +1388,13 @@ class Koan:
                 size = sizes[-1]
             else:
                 size = sizes[counter]
-            disks.append([path,size])
+            driver = drivers[counter]
+            disks.append([path,size,driver])
             counter = counter + 1
         if len(disks) == 0:
-            print "paths: ", paths
-            print "sizes: ", sizes
+            print "paths:   ", paths
+            print "sizes:   ", sizes
+            print "drivers: ", drivers
             raise InfoException, "Disk configuration not resolvable!"
         return disks
 
@@ -1442,6 +1461,25 @@ class Koan:
             print "invalid file size specified, using defaults"
             return default_filesize
         return int(size)
+
+    #---------------------------------------------------
+
+    def calc_virt_drivers(self,data):
+        driver = self.safe_load(data,'virt_disk_driver',default='raw')
+
+        tokens = driver.split(",")
+        accum = []
+        for t in tokens:
+            # FIXME: this list should be pulled out of 
+            #        the virtinst VirtualDisk class, but
+            #        not all versions of virtinst have a 
+            #        nice list to use
+            if t in ('raw','qcow','aio'):
+               accum.append(t)
+            else:
+               print "invalid disk driver specified, defaulting to 'raw'"
+               accum.append('raw')
+        return accum
 
     #---------------------------------------------------
 
@@ -1601,7 +1639,7 @@ class Koan:
             cmd = sub_process.Popen(args, stdout=sub_process.PIPE, shell=True)
             freespace_str = cmd.communicate()[0]
             freespace_str = freespace_str.split("\n")[0].strip()
-            freespace_str = re.sub("(?i)G","", freespace_str) # remove gigabytes
+            freespace_str = freespace_str.lower().replace("g","") # remove gigabytes
             print "(%s)" % freespace_str
             freespace = int(float(freespace_str))
 

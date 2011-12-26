@@ -21,12 +21,13 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 """
 import yaml
 import os
+import urllib
 
 from cobbler.services import CobblerSvc
 
 def application(environ, start_response):
 
-    my_uri = environ['REQUEST_URI']
+    my_uri = urllib.unquote(environ['REQUEST_URI'])
     
     form = {}
 
@@ -60,7 +61,7 @@ def application(environ, start_response):
     fd = open("/etc/cobbler/settings")
     data = fd.read()
     fd.close()
-    ydata = yaml.load(data)
+    ydata = yaml.safe_load(data)
     remote_port = ydata.get("xmlrpc_port",25151)
 
     # instantiate a CobblerWeb object

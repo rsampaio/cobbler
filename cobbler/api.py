@@ -22,12 +22,12 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 02110-1301  USA
 """
 
+import sys
 import yaml
 import config
 import utils
 import action_sync
 import action_check
-import action_import
 import action_reposync
 import action_status
 import action_validate
@@ -40,10 +40,6 @@ import action_log
 import action_hardlink
 import action_dlcontent
 from cexceptions import *
-try:
-    import subprocess as sub_process
-except:
-    import sub_process
 import module_loader
 import kickgen
 import yumgen
@@ -71,6 +67,9 @@ import item_file
 ERROR = 100
 INFO  = 10
 DEBUG = 5
+
+# FIXME: add --quiet depending on if not --verbose?
+RSYNC_CMD =  "rsync -a %s '%s' %s --exclude-from=/etc/cobbler/rsync.exclude --progress"
 
 # notes on locking:
 # BootAPI is a singleton object
@@ -223,7 +222,7 @@ class BootAPI:
         fd = open("/etc/cobbler/version")
         ydata = fd.read()
         fd.close()
-        data = yaml.load(ydata)
+        data = yaml.safe_load(ydata)
         if not extended:
             # for backwards compatibility and use with koan's comparisons
             elems = data["version_tuple"] 
@@ -246,13 +245,17 @@ class BootAPI:
 
     def get_item(self, what, name):
         self.log("get_item",[what,name],debug=True)
-        return self._config.get_items(what).get(name)
+        item = self._config.get_items(what).get(name)
+        self.log("done with get_item",[what,name],debug=True)
+        return item #self._config.get_items(what).get(name)
 
     # =============================================================
 
     def get_items(self, what):
         self.log("get_items",[what],debug=True)
-        return self._config.get_items(what)
+        items = self._config.get_items(what)
+        self.log("done with get_items",[what],debug=True)
+        return items #self._config.get_items(what)
     
     def distros(self):
         """
@@ -746,18 +749,96 @@ class BootAPI:
         to something like "nfs://path/to/mirror_url/root" 
         """
         self.log("import_tree",[mirror_url, mirror_name, network_root, kickstart_file, rsync_flags])
+
+        # both --path and --name are required arguments
+        if mirror_url is None:
+            self.log("import failed.  no --path specified")
+            return False
+        if mirror_name is None:
+            self.log("import failed.  no --name specified")
+            return False
+
+        path = os.path.normpath("%s/ks_mirror/%s" % (self.settings().webdir, mirror_name))
+        if arch is not None:
+            arch = arch.lower()
+            if arch == "x86":
+                # be consistent
+                arch = "i386"
+            path += ("-%s" % arch)
+
+        # we need to mirror (copy) the files
+        self.log("importing from a network location, running rsync to fetch the files first")
+
+        utils.mkdir(path)
+
+        # prevent rsync from creating the directory name twice
+        # if we are copying via rsync
+
+        if not mirror_url.endswith("/"):
+            mirror_url = "%s/" % mirror_url
+
+        if mirror_url.startswith("http://") or mirror_url.startswith("ftp://") or mirror_url.startswith("nfs://"):
+            # http mirrors are kind of primative.  rsync is better.
+            # that's why this isn't documented in the manpage and we don't support them.
+            # TODO: how about adding recursive FTP as an option?
+            self.log("unsupported protocol")
+            return False
+        else:
+            # good, we're going to use rsync..
+            # we don't use SSH for public mirrors and local files.
+            # presence of user@host syntax means use SSH
+            spacer = ""
+            if not mirror_url.startswith("rsync://") and not mirror_url.startswith("/"):
+                spacer = ' -e "ssh" '
+            rsync_cmd = RSYNC_CMD
+            if rsync_flags:
+                rsync_cmd = rsync_cmd + " " + rsync_flags
+
+            # kick off the rsync now
+            utils.run_this(rsync_cmd, (spacer, mirror_url, path), self.logger)
+
+        if network_root is not None:
+            # in addition to mirroring, we're going to assume the path is available
+            # over http, ftp, and nfs, perhaps on an external filer.  scanning still requires
+            # --mirror is a filesystem path, but --available-as marks the network path.
+            # this allows users to point the path at a directory containing just the network
+            # boot files while the rest of the distro files are available somewhere else.
+
+            # find the filesystem part of the path, after the server bits, as each distro
+            # URL needs to be calculated relative to this.
+
+            if not network_root.endswith("/"):
+                network_root = network_root + "/"
+            valid_roots = [ "nfs://", "ftp://", "http://" ]
+            for valid_root in valid_roots:
+                if network_root.startswith(valid_root):
+                    break
+            else:
+                self.log("Network root given to --available-as must be nfs://, ftp://, or http://")
+                return False
+
+            if network_root.startswith("nfs://"):
+                try:
+                    (a,b,rest) = network_root.split(":",3)
+                except:
+                    self.log("Network root given to --available-as is missing a colon, please see the manpage example.")
+                    return False
+
         importer_modules = self.get_modules_in_category("manage/import")
         for importer_module in importer_modules:
             manager = importer_module.get_import_manager(self._config,logger)
-            if 1:#try:
-                (found,pkgdir) = manager.check_for_signature(mirror_url,breed)
+            try:
+                (found,pkgdir) = manager.check_for_signature(path,breed)
                 if found: 
                     self.log("running import manager: %s" % manager.what())
-                    return manager.run(pkgdir,mirror_url,mirror_name,network_root,kickstart_file,rsync_flags,arch,breed,os_version)
-            #except:
-            #    self.log("an error occured while running the import manager")
-            #    continue
+                    return manager.run(pkgdir,mirror_name,path,network_root,kickstart_file,rsync_flags,arch,breed,os_version)
+            except:
+                self.log("an exception occured while running the import manager")
+                self.log("error was: %s" % sys.exc_info()[1])
+                continue
         self.log("No import managers found a valid signature at the location specified")
+        # FIXME: since we failed, we should probably remove the 
+        # path tree we created above so we don't leave cruft around
         return False
 
     # ==========================================================================

@@ -1,6 +1,6 @@
 """
-Builds non-live bootable CD's that have PXE-equivalent behavior
-for all cobbler profiles currently in memory.
+Builds bootable CD images that have PXE-equivalent behavior
+for all Cobbler distros/profiles/systems currently in memory.
 
 Copyright 2006-2009, Red Hat, Inc
 Michael DeHaan <mdehaan@redhat.com>
@@ -34,36 +34,18 @@ from cexceptions import *
 from utils import _
 import clogger
 
-# FIXME: lots of overlap with pxegen.py, should consolidate
-# FIXME: disable timeouts and remove local boot for this?
-HEADER = """
-
-DEFAULT menu
-PROMPT 0
-MENU TITLE Cobbler | http://cobbler.et.redhat.com
-TIMEOUT 200
-TOTALTIMEOUT 6000
-ONTIMEOUT local
-
-LABEL local
-        MENU LABEL (local)
-        MENU DEFAULT
-        KERNEL chain.c32
-        APPEND hd0 0
-
-"""
 
 class BuildIso:
     """
-    Handles conversion of internal state to the tftpboot tree layout
+    Handles conversion of internal state to the isolinux tree layout
     """
-
     def __init__(self,config,verbose=False,logger=None):
         """
         Constructor
         """
         self.verbose     = verbose
         self.config      = config
+        self.settings    = config.settings()
         self.api         = config.api
         self.distros     = config.distros()
         self.profiles    = config.profiles()
@@ -75,6 +57,28 @@ class BuildIso:
         if logger is None:
             logger       = clogger.Logger()
         self.logger      = logger
+        # grab the header from buildiso.header file
+        header_src = open(os.path.join(self.settings.iso_template_dir,"buildiso.template"))
+        self.iso_template = header_src.read()
+        header_src.close()
+
+
+    def add_remaining_kopts(self,koptdict):
+        """
+        Add remaining kernel_options to append_line
+        """
+        append_line = ""
+        for (k, v) in koptdict.iteritems():
+            if v == None:
+                append_line += " %s" % k
+            else:
+                if type(v) == list:
+                    for i in v:
+                        append_line += " %s=%s" % (k,i)                
+                else:
+                    append_line += " %s=%s" % (k,v)
+        append_line += "\n"
+        return append_line
 
 
     def make_shorter(self,distname):
@@ -85,51 +89,62 @@ class BuildIso:
             self.distmap[distname] = str(self.distctr)
             return str(self.distctr)
 
+
+    def copy_boot_files(self,distro,destdir,prefix=None):
+       """
+       Copy kernel/initrd to destdir with (optional) newfile prefix
+       """
+       if not os.path.exists(distro.kernel):
+          utils.die(self.logger,"path does not exist: %s" % distro.kernel)
+       if not os.path.exists(distro.initrd):
+          utils.die(self.logger,"path does not exist: %s" % distro.initrd)
+       if prefix is None:
+          shutil.copyfile(distro.kernel, os.path.join(destdir, "%s" % os.path.basename(distro.kernel)))
+          shutil.copyfile(distro.initrd, os.path.join(destdir, "%s" % os.path.basename(distro.initrd)))
+       else:
+          shutil.copyfile(distro.kernel, os.path.join(destdir, "%s.krn" % prefix))
+          shutil.copyfile(distro.initrd, os.path.join(destdir, "%s.img" % prefix))
+
+
+    def sort_name(self,a,b):
+       """
+       Sort profiles/systems by name
+       """
+       return cmp(a.name,b.name)
+
   
     def generate_netboot_iso(self,imagesdir,isolinuxdir,profiles=None,systems=None,exclude_dns=None):
-       # function to sort profiles/systems by name
-       def sort_name(a,b):
-           return cmp(a.name,b.name)
-
-       # handle profile selection override provided via commandline
-       # default is all profiles
+       """
+       Create bootable CD image to be used for network installations
+       """
+       # setup all profiles/systems lists
        all_profiles = [profile for profile in self.api.profiles()]
-       all_profiles.sort(sort_name)
-       if profiles is not None:
-          which_profiles = profiles.split(",")
-       else:
-          which_profiles = []
-
-       # handle system selection override provided via commandline
-       # default is all systems
+       all_profiles.sort(self.sort_name)
        all_systems = [system for system in self.api.systems()]
-       all_systems.sort(sort_name)
-       if systems is not None:
-          which_systems = systems.split(",")
-       else:
-          which_systems = []
+       all_systems.sort(self.sort_name)
+       # convert input to lists
+       which_profiles = utils.input_string_or_list(profiles)
+       which_systems = utils.input_string_or_list(systems)
+
+       # no profiles/systems selection is made, let's process everything
+       do_all_systems = False
+       do_all_profiles = False
+       if len(which_profiles) == 0 and len(which_systems) == 0:
+          do_all_systems = True
+          do_all_profiles = True
 
        # setup isolinux.cfg
        isolinuxcfg = os.path.join(isolinuxdir, "isolinux.cfg")
        cfg = open(isolinuxcfg, "w+")
-       cfg.write(HEADER) # FIXME: use template
+       cfg.write(self.iso_template)
 
        # iterate through selected profiles
        for profile in all_profiles:
-          if profile.name in which_profiles or profiles is None:
+          if profile.name in which_profiles or do_all_profiles is True:
              self.logger.info("processing profile: %s" % profile.name)
              dist = profile.get_conceptual_parent()
              distname = self.make_shorter(dist.name)
-             # buildisodir/isolinux/$distro/vmlinuz, initrd.img
-             # FIXME: this will likely crash on non-Linux breeds
-             f1 = os.path.join(isolinuxdir, "%s.krn" % distname)
-             f2 = os.path.join(isolinuxdir, "%s.img" % distname)
-             if not os.path.exists(dist.kernel):
-                 utils.die(self.logger,"path does not exist: %s" % dist.kernel)
-             if not os.path.exists(dist.initrd):
-                 utils.die(self.logger,"path does not exist: %s" % dist.initrd)
-             shutil.copyfile(dist.kernel, f1)
-             shutil.copyfile(dist.initrd, f2)
+             self.copy_boot_files(dist,isolinuxdir,distname)
 
              cfg.write("\n")
              cfg.write("LABEL %s\n" % profile.name)
@@ -144,9 +159,15 @@ class BuildIso:
 
              append_line = " append initrd=%s.img" % distname
              if dist.breed == "suse":
+                 if data["proxy"] != "":
+                     append_line += " proxy=%s" % data["proxy"]
                  append_line += " autoyast=%s" % data["kickstart"]
              if dist.breed == "redhat":
                  append_line += " ks=%s" % data["kickstart"]
+             if dist.breed in ["ubuntu","debian"]:
+                 append_line += " auto-install/enable=true url=%s" % data["kickstart"]
+                 if data["proxy"] != "":
+                     append_line += " mirror/http/proxy=%s" % data["proxy"]
              append_line = append_line + " %s\n" % data["kernel_options"]
              cfg.write(append_line)
 
@@ -158,16 +179,12 @@ class BuildIso:
 
        # iterate through all selected systems
        for system in all_systems:
-          if system.name in which_systems or systems is None:
+          if system.name in which_systems or do_all_systems is True:
              self.logger.info("processing system: %s" % system.name)
              profile = system.get_conceptual_parent()
              dist = profile.get_conceptual_parent()
              distname = self.make_shorter(dist.name)
-             # buildisodir/isolinux/$distro/vmlinuz, initrd.img
-             # FIXME: this will likely crash on non-Linux breeds
-             if not os.path.exists(dist.kernel) or not os.path.exists(dist.initrd):
-                shutil.copyfile(dist.kernel, os.path.join(isolinuxdir, "%s.krn" % distname))
-                shutil.copyfile(dist.initrd, os.path.join(isolinuxdir, "%s.img" % distname))
+             self.copy_boot_files(dist,isolinuxdir,distname)
 
              cfg.write("\n")
              cfg.write("LABEL %s\n" % system.name)
@@ -182,9 +199,34 @@ class BuildIso:
 
              append_line = " append initrd=%s.img" % distname
              if dist.breed == "suse":
+                if bdata["proxy"] != "":
+                    append_line += " proxy=%s" % bdata["proxy"]
                 append_line += " autoyast=%s" % bdata["kickstart"]
              if dist.breed == "redhat":
                 append_line += " ks=%s" % bdata["kickstart"]
+             if dist.breed in ["ubuntu","debian"]:
+                append_line += " auto-install/enable=true url=%s netcfg/disable_dhcp=true" % bdata["kickstart"]
+                if bdata["proxy"] != "":
+                    append_line += " mirror/http/proxy=%s" % bdata["proxy"]
+                # hostname is required as a parameter, the one in the preseed is not respected
+                my_domain = "local.lan"
+                if system.hostname != "":
+                    # if this is a FQDN, grab the first bit
+                    my_hostname = system.hostname.split(".")[0]
+                    _domain = system.hostname.split(".")[1:]
+                    if _domain:
+                       my_domain = ".".join(_domain)
+                else:
+                    my_hostname = system.name.split(".")[0]
+                    _domain = system.name.split(".")[1:]
+                    if _domain:
+                       my_domain = ".".join(_domain)
+                # at least for debian deployments configured for DHCP networking
+                # this values are not used, but specifying here avoids questions
+                append_line += " hostname=%s domain=%s" % (my_hostname, my_domain)
+                # a similar issue exists with suite name, as installer requires
+                # the existence of "stable" in the dists directory
+                append_line += " suite=%s" % dist.os_version
 
              # try to add static ip boot options to avoid DHCP (interface/ip/netmask/gw/dns)
              # check for overrides first and clear them from kernel_options
@@ -220,43 +262,63 @@ class BuildIso:
                    my_dns = data["kernel_options"]["nameserver"]
                    del data["kernel_options"]["nameserver"]
 
-             # if no kernel_options overrides are present try to retrieve the needed information
-             # there's no mechanism in cobbler which can guarantee we've found the proper interface,
-             # so if we don't succeed finding one just give up rather than polluting the append_line
-             # with possibly false information. we don't deal with multihomed systems until cobbler
-             # provides a method to determine to proper management interface.
+             if dist.breed in ["ubuntu","debian"]:
+                if data["kernel_options"].has_key("netcfg/choose_interface") and data["kernel_options"]["netcfg/choose_interface"] != "":
+                   my_int = data["kernel_options"]["netcfg/choose_interface"]
+                   del data["kernel_options"]["netcfg/choose_interface"]
+                if data["kernel_options"].has_key("netcfg/get_ipaddress") and data["kernel_options"]["netcfg/get_ipaddress"] != "":
+                   my_ip = data["kernel_options"]["netcfg/get_ipaddress"]
+                   del data["kernel_options"]["netcfg/get_ipaddress"]
+                if data["kernel_options"].has_key("netcfg/get_netmask") and data["kernel_options"]["netcfg/get_netmask"] != "":
+                   my_mask = data["kernel_options"]["netcfg/get_netmask"]
+                   del data["kernel_options"]["netcfg/get_netmask"]
+                if data["kernel_options"].has_key("netcfg/get_gateway") and data["kernel_options"]["netcfg/get_gateway"] != "":
+                   my_gw = data["kernel_options"]["netcfg/get_gateway"]
+                   del data["kernel_options"]["netcfg/get_gateway"]
+                if data["kernel_options"].has_key("netcfg/get_nameservers") and data["kernel_options"]["netcfg/get_nameservers"] != "":
+                   my_dns = data["kernel_options"]["netcfg/get_nameservers"]
+                   del data["kernel_options"]["netcfg/get_nameservers"]
+
+             # if no kernel_options overrides are present find the management interface
+             # do nothing when zero or multiple management interfaces are found
              if my_int is None:
-                num_master_ints = 0; num_slave_ints = 0; slave_ints = []
-                num_ints = len(data["interfaces"].keys())
-
-                if num_ints == 1:
-                   # only 1 interface defined, use it
-                   my_int = data["interfaces"].keys()[0]
-
-                if num_ints > 1:
-                   # multiple interfaces found, make an educated guess
+                mgmt_ints = []; mgmt_ints_multi = []; slave_ints = []
+                if len(data["interfaces"].keys()) >= 1:
                    for (iname, idata) in data["interfaces"].iteritems():
-                      if idata["bonding"] == "master":
-                         num_master_ints += 1
-                      if idata["bonding"] == "slave":
-                         num_slave_ints += 1
+                      if idata["management"] == True and idata["interface_type"] in ["master","bond","bridge"]:
+                         # bonded/bridged management interface
+                         mgmt_ints_multi.append(iname)
+                      if idata["management"] == True and idata["interface_type"] not in ["master","bond","bridge","slave","bond_slave","bridge_slave"]:
+                         # single management interface
+                         mgmt_ints.append(iname)
+
+                if len(mgmt_ints_multi) == 1 and len(mgmt_ints) == 0:
+                   # bonded/bridged management interface, find a slave interface
+                   # if eth0 is a slave use that (it's what people expect)
+                   for (iname, idata) in data["interfaces"].iteritems():
+                      if idata["interface_type"] in ["slave","bond_slave","bridge_slave"] and idata["interface_master"] == mgmt_ints_multi[0]:
                          slave_ints.append(iname)
 
-                      if ((num_master_ints + num_slave_ints) == num_ints) and num_master_ints == 1:
-                         # only a *single* bond and no multihomeing, pick a slave interface
-                         # if eth0 is a slave use that (it's what people expect)
-                         if "eth0" in slave_ints:
-                            my_int = "eth0"
-                         else:
-                            my_int = slave_ints[0]
+                   if "eth0" in slave_ints:
+                      my_int = "eth0"
+                   else:
+                      my_int = slave_ints[0]
+                   # set my_ip from the bonded/bridged interface here
+                   my_ip = data["ip_address_" + data["interface_master_" + my_int]]
+                   my_mask = data["netmask_" + data["interface_master_" + my_int]]
 
+                if len(mgmt_ints) == 1 and len(mgmt_ints_multi) == 0:
+                   # single management interface
+                   my_int = mgmt_ints[0]
+
+             # lookup tcp/ip configuration data
              if my_ip is None and my_int is not None:
                 if data.has_key("ip_address_" + my_int) and data["ip_address_" + my_int] != "":
                    my_ip = data["ip_address_" + my_int]
 
              if my_mask is None and my_int is not None:
-                if data.has_key("subnet_" + my_int) and data["subnet_" + my_int] != "":
-                   my_mask = data["subnet_" + my_int]
+                if data.has_key("netmask_" + my_int) and data["netmask_" + my_int] != "":
+                   my_mask = data["netmask_" + my_int]
 
              if my_gw is None:
                 if data.has_key("gateway") and data["gateway"] != "":
@@ -269,37 +331,51 @@ class BuildIso:
              # add information to the append_line
              if my_int is not None:
                  if dist.breed == "suse":
-                     append_line += " netdevice=%s" % my_int
+                     if data.has_key("mac_address_" + my_int) and data["mac_address_" + my_int] != "":
+                        append_line += " netdevice=%s" % data["mac_address_" + my_int].lower()
+                     else:
+                        append_line += " netdevice=%s" % my_int
                  if dist.breed == "redhat":
-                     append_line += " ksdevice=%s" % my_int
+                     if data.has_key("mac_address_" + my_int) and data["mac_address_" + my_int] != "":
+                        append_line += " ksdevice=%s" % data["mac_address_" + my_int]
+                     else:
+                        append_line += " ksdevice=%s" % my_int
+                 if dist.breed in ["ubuntu","debian"]:
+                     append_line += " netcfg/choose_interface=%s" % my_int
 
              if my_ip is not None:
                  if dist.breed == "suse":
                      append_line += " hostip=%s" % my_ip
                  if dist.breed == "redhat":
                      append_line += " ip=%s" % my_ip
+                 if dist.breed in ["ubuntu","debian"]:
+                     append_line += " netcfg/get_ipaddress=%s" % my_ip
 
              if my_mask is not None:
                  if dist.breed in ["suse","redhat"]:
                      append_line += " netmask=%s" % my_mask
+                 if dist.breed in ["ubuntu","debian"]:
+                     append_line += " netcfg/get_netmask=%s" % my_mask
 
              if my_gw is not None:
                  if dist.breed in ["suse","redhat"]:
                      append_line += " gateway=%s" % my_gw
+                 if dist.breed in ["ubuntu","debian"]:
+                     append_line += " netcfg/get_gateway=%s" % my_gw
 
              if exclude_dns is None or my_dns is not None:
                 if dist.breed == "suse":
                    append_line += " nameserver=%s" % my_dns[0]
                 if dist.breed == "redhat":
-                   append_line += " dns=%s" % ",".join(my_dns)
+                   if type(my_dns) == list:
+                      append_line += " dns=%s" % ",".join(my_dns)
+                   else:
+                      append_line += " dns=%s" % my_dns
+                if dist.breed in ["ubuntu","debian"]:
+                   append_line += " netcfg/get_nameservers=%s" % ",".join(my_dns)
 
              # add remaining kernel_options to append_line
-             for (k, v) in data["kernel_options"].iteritems():
-                if v == None:
-                   append_line += " %s" % k
-                else:
-                   append_line += " %s=%s" % (k,v)
-             append_line += "\n"
+             append_line += self.add_remaining_kopts(data["kernel_options"])
              cfg.write(append_line)
 
              length = len(append_line)
@@ -312,7 +388,9 @@ class BuildIso:
 
 
     def generate_standalone_iso(self,imagesdir,isolinuxdir,distname,filesource):
-
+        """
+        Create bootable CD image to be used for handsoff CD installtions
+        """
         # Get the distro object for the requested distro
         # and then get all of its descendants (profiles/sub-profiles/systems)
         distro = self.api.find_distro(distname)
@@ -337,16 +415,7 @@ class BuildIso:
                 utils.die(self.logger," Error, no installation source found. When building a standalone ISO, you must specify a --source if the distro install tree is not hosted locally")
 
         self.logger.info("copying kernels and initrds for standalone distro")
-        # buildisodir/isolinux/$distro/vmlinuz, initrd.img
-        # FIXME: this will likely crash on non-Linux breeds
-        f1 = os.path.join(isolinuxdir, "vmlinuz")
-        f2 = os.path.join(isolinuxdir, "initrd.img")
-        if not os.path.exists(distro.kernel):
-            utils.die(self.logger,"path does not exist: %s" % distro.kernel)
-        if not os.path.exists(distro.initrd):
-            utils.die(self.logger,"path does not exist: %s" % distro.initrd)
-        shutil.copyfile(distro.kernel, f1)
-        shutil.copyfile(distro.initrd, f2)
+        self.copy_boot_files(distro,isolinuxdir,None)
 
         cmd = "rsync -rlptgu --exclude=boot.cat --exclude=TRANS.TBL --exclude=isolinux/ %s/ %s/../" % (filesource, isolinuxdir)
         self.logger.info("- copying distro %s files (%s)" % (distname,cmd))
@@ -357,22 +426,28 @@ class BuildIso:
         self.logger.info("generating a isolinux.cfg")
         isolinuxcfg = os.path.join(isolinuxdir, "isolinux.cfg")
         cfg = open(isolinuxcfg, "w+")
-        cfg.write(HEADER) # fixme, use template
+        cfg.write(self.iso_template)
 
         for descendant in descendants:
-            data = utils.blender(self.api, True, descendant)
+            data = utils.blender(self.api, False, descendant)
 
             cfg.write("\n")
             cfg.write("LABEL %s\n" % descendant.name)
             cfg.write("  MENU LABEL %s\n" % descendant.name)
-            cfg.write("  kernel vmlinuz\n")
+            cfg.write("  kernel %s\n" % os.path.basename(distro.kernel))
 
-            data["kickstart"] = "cdrom:/isolinux/ks-%s.cfg" % descendant.name
+            append_line = "  append initrd=%s" % os.path.basename(distro.initrd)
+            if distro.breed == "redhat":
+               append_line += " ks=cdrom:/isolinux/%s.cfg" % descendant.name
+            if distro.breed == "suse":
+               append_line += " autoyast=file:///isolinux/%s.cfg install=file:///" % descendant.name
+               if data["kernel_options"].has_key("install"):
+                  del data["kernel_options"]["install"]
+            if distro.breed in ["ubuntu","debian"]:
+               append_line += " auto-install/enable=true preseed/file=/cdrom/isolinux/%s.cfg" % descendant.name
 
-            append_line = "  append initrd=initrd.img"
-            append_line = append_line + " ks=%s " % data["kickstart"]
-            append_line = append_line + " %s\n" % data["kernel_options"]
-
+            # add remaining kernel_options to append_line
+            append_line += self.add_remaining_kopts(data["kernel_options"])
             cfg.write(append_line)
 
             if descendant.COLLECTION_TYPE == 'profile':
@@ -383,7 +458,7 @@ class BuildIso:
             cdregex = re.compile("url .*\n", re.IGNORECASE)
             kickstart_data = cdregex.sub("cdrom\n", kickstart_data)
 
-            ks_name = os.path.join(isolinuxdir, "ks-%s.cfg" % descendant.name)
+            ks_name = os.path.join(isolinuxdir, "%s.cfg" % descendant.name)
             ks_file = open(ks_name, "w+")
             ks_file.write(kickstart_data)
             ks_file.close()
@@ -397,8 +472,6 @@ class BuildIso:
 
 
     def run(self,iso=None,buildisodir=None,profiles=None,systems=None,distro=None,standalone=None,source=None,exclude_dns=None):
-
-        self.settings = self.config.settings()
 
         # the distro option is for stand-alone builds only
         if not standalone and distro is not None:

@@ -1,9 +1,10 @@
 """
 Serializer code for cobbler.
-Experimental:  couchdb version
+Experimental:  mongodb version
 
 Copyright 2006-2009, Red Hat, Inc
 Michael DeHaan <mdehaan@redhat.com>
+James Cammarata <jimi@sngx.net>
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -24,10 +25,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 import distutils.sysconfig
 import os
 import sys
-import glob
 import traceback
-import yaml # PyYAML
-import simplejson
 import exceptions
 
 plib = distutils.sysconfig.get_python_lib()
@@ -38,94 +36,99 @@ from utils import _
 import utils
 from cexceptions import *
 import os
-import couch
+import ConfigParser
 
-typez = [ "distro", "profile", "system", "image", "repo" ]
-couchdb = couch.Couch('127.0.0.1')
+pymongo_loaded = False
+
+try:
+    from pymongo import Connection
+    pymongo_loaded = True
+except:
+    # FIXME: log message
+    pass
+
+cp = ConfigParser.ConfigParser()
+cp.read("/etc/cobbler/mongodb.conf")
+
+host = cp.get("connection","host")
+port = int(cp.get("connection","port"))
+mongodb = None
 
 def __connect():
-   couchdb.connect()
-   for x in typez:
-       couchdb.createDb(x)
+    # TODO: detect connection error
+    global mongodb
+    try:
+        mongodb = Connection('localhost', 27017)['cobbler']
+        return True
+    except:
+        # FIXME: log error
+        return False
 
 def register():
     """
     The mandatory cobbler module registration hook.
     """
     # FIXME: only run this if enabled.
+    if not pymongo_loaded:
+        return ""
     return "serializer"
 
 def what():
     """
     Module identification function
     """
-    return "serializer/couchdb"
+    return "serializer/mongodb"
 
 def serialize_item(obj, item):
-    __connect()
-    datastruct = item.to_datastruct()
-    # blindly prevent conflict resolution
-    couchdb.openDoc(obj.collection_type(), item.name)
-    data = couchdb.saveDoc(obj.collection_type(),
-                  simplejson.dumps(datastruct, encoding="utf-8"),
-                  item.name)
-    data = simplejson.loads(data)
+    if not __connect():
+        # FIXME: log error
+        return False
+    collection = mongodb[obj.collection_type()]
+    data = collection.find_one({'name':item.name})
+    if data:
+        collection.update({'name':item.name}, item.to_datastruct())
+    else:
+        collection.insert(item.to_datastruct())
     return True
 
 def serialize_delete(obj, item):
-    __connect()
-    couchdb.deleteDoc(obj.collection_type(),
-                    item.name)
+    if not __connect():
+        # FIXME: log error
+        return False
+    collection = mongodb[obj.collection_type()]
+    collection.remove({'name':item.name})
     return True
 
 def deserialize_item_raw(collection_type, item_name):
-    __connect()
-    data = couchdb.openDoc(collection_type, item_name)
-    return simplejson.loads(data, encoding="utf-8")
+    if not __connect():
+        # FIXME: log error
+        return False
+    collection = mongodb[obj.collection_type()]
+    data = collection.find_one({'name':item.name})
+    return data
 
 def serialize(obj):
     """
-    Save an object to disk.  Object must "implement" Serializable.
-    FIXME: Return False on access/permission errors.
-    This should NOT be used by API if serialize_item is available.
+    Save an object to the database.
     """
-    __connect()
+    # TODO: error detection
     ctype = obj.collection_type()
-    if ctype == "settings":
-        return True
     for x in obj:
         serialize_item(obj,x)
     return True
 
 def deserialize_raw(collection_type):
-    __connect()
-    contents = simplejson.loads(couchdb.listDoc(collection_type))
-    items = []
-    if contents.has_key("error") and contents.get("reason","").find("Missing") != -1:
-        # no items in the DB yet
-        return []
-    for x in contents["rows"]:
-       items.append(x["key"])
-
-    if collection_type == "settings":
-         fd = open("/etc/cobbler/settings")
-         datastruct = yaml.safe_load(fd.read())
-         fd.close()
-         return datastruct
-    else:
-         results = []
-         for f in items:
-             data = couchdb.openDoc(collection_type, f)
-             datastruct = simplejson.loads(data, encoding='utf-8')
-             results.append(datastruct)
-         return results    
+    if not __connect():
+        # FIXME: log error
+        return False
+    collection = mongodb[collection_type]
+    return collection.find()
 
 def deserialize(obj,topological=True):
     """
     Populate an existing object with the contents of datastruct.
-    Object must "implement" Serializable.  
+    Object must "implement" Serializable.
     """
-    __connect()
     datastruct = deserialize_raw(obj.collection_type())
     if topological and type(datastruct) == list:
        datastruct.sort(__depth_cmp)

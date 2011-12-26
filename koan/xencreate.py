@@ -71,7 +71,8 @@ def start_install(name=None,
                   bridge=None, 
                   virt_type=None,
                   virt_auto_boot=False,
-                  qemu_driver_type=None):
+                  qemu_driver_type=None,
+                  qemu_net_type=None):
 
     if profile_data.has_key("file"):
         raise koan.InfoException("Xen does not work with --image yet")
@@ -113,6 +114,7 @@ def start_install(name=None,
     guest.set_name(name)
     guest.set_memory(ram)
     guest.set_vcpus(vcpus)
+    guest.set_autostart(virt_auto_boot)
 
     if not no_gfx:
         guest.set_graphics("vnc")
@@ -141,7 +143,7 @@ def start_install(name=None,
             counter = counter + 1
             intf = profile_data["interfaces"][iname]
 
-            if intf["bonding"] == "master" or vlanpattern.match(iname) or iname.find(":") != -1: 
+            if intf["interface_type"] in ("master","bond","bridge") or vlanpattern.match(iname) or iname.find(":") != -1:
                 continue
 
             mac = intf["mac_address"]

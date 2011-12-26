@@ -1,4 +1,5 @@
 # Django settings for cobbler-web project.
+import django
 
 DEBUG = True
 TEMPLATE_DEBUG = DEBUG
@@ -17,7 +18,7 @@ DATABASE_HOST = ''
 DATABASE_PORT = ''       
 
 # Force Django to use the systems timezone
-TIME_ZONE = None
+#TIME_ZONE = None
 
 # Language section
 # TBD.
@@ -31,8 +32,7 @@ MEDIA_ROOT = ''
 MEDIA_URL = ''
 ADMIN_MEDIA_PREFIX = '/media/'
 
-# FIXME: ???
-SECRET_KEY = 'w&x*74x-b=ycigsdya03699o!9kt4(z4wyx-us9q=--&7clv4='
+SECRET_KEY = ''
 
 # code config
 
@@ -40,11 +40,25 @@ TEMPLATE_LOADERS = (
     'django.template.loaders.filesystem.load_template_source',
     'django.template.loaders.app_directories.load_template_source',
 )
-MIDDLEWARE_CLASSES = (
-    'django.middleware.common.CommonMiddleware',
-    'django.contrib.sessions.middleware.SessionMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
-)
+
+if django.VERSION[0] == 1 and django.VERSION[1] < 2:
+    # Legacy django had a different CSRF method, which also had 
+    # different middleware. We check the vesion here so we bring in 
+    # the correct one.
+    MIDDLEWARE_CLASSES = (
+        'django.middleware.common.CommonMiddleware',
+        'django.contrib.csrf.middleware.CsrfMiddleware',
+        'django.contrib.sessions.middleware.SessionMiddleware',
+        'django.contrib.auth.middleware.AuthenticationMiddleware',
+    )
+else:
+    MIDDLEWARE_CLASSES = (
+        'django.middleware.common.CommonMiddleware',
+        'django.middleware.csrf.CsrfViewMiddleware',
+        'django.contrib.sessions.middleware.SessionMiddleware',
+        'django.contrib.auth.middleware.AuthenticationMiddleware',
+    )
+
 ROOT_URLCONF = 'urls'
 
 TEMPLATE_DIRS = (

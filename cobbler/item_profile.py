@@ -40,11 +40,13 @@ FIELDS = [
   ["kernel_options",{},'<<inherit>>',"Kernel Options",True,"Ex: selinux=permissive",0,"dict"],
   ["kernel_options_post",{},'<<inherit>>',"Kernel Options (Post Install)",True,"Ex: clocksource=pit noapic",0,"dict"],
   ["ks_meta",{},'<<inherit>>',"Kickstart Metadata",True,"Ex: dog=fang agent=86",0,"dict"],
+  ["proxy","",None,"Proxy",True,"Proxy URL",0,"str"],
   ["repos",[],'<<inherit>>',"Repos",True,"Repos to auto-assign to this profile",[],"list"],
   ["comment","","","Comment",True,"Free form text description",0,"str"],
   ["virt_auto_boot","SETTINGS:virt_auto_boot",'<<inherit>>',"Virt Auto Boot",True,"Auto boot this VM?",0,"bool"],
   ["virt_cpus",1,'<<inherit>>',"Virt CPUs",True,"integer",0,"int"],
   ["virt_file_size","SETTINGS:default_virt_file_size",'<<inherit>>',"Virt File Size(GB)",True,"",0,"int"],
+  ["virt_disk_driver","SETTINGS:default_virt_disk_driver",'<<inherit>>',"Virt Disk Driver Type",True,"The on-disk format for the virtualization disk","raw","str"],
   ["virt_ram","SETTINGS:default_virt_ram",'<<inherit>>',"Virt RAM (MB)",True,"",0,"int"],
   ["depth",1,1,"",False,"",0,"int"],
   ["virt_type","SETTINGS:default_virt_type",'<<inherit>>',"Virt Type",True,"Virtualization technology to use",["xenpv","xenfv","qemu", "vmware"],"str"],
@@ -150,6 +152,10 @@ class Profile(item.Item):
         self.name_servers_search = data
         return True
 
+    def set_proxy(self,proxy):
+        self.proxy = proxy
+        return True
+
     def set_enable_menu(self,enable_menu):
         """
         Sets whether or not the profile will be listed in the default
@@ -204,6 +210,9 @@ class Profile(item.Item):
     def set_virt_file_size(self,num):
         return utils.set_virt_file_size(self,num)
  
+    def set_virt_disk_driver(self,driver):
+        return utils.set_virt_disk_driver(self,driver)
+
     def set_virt_ram(self,num):
         return utils.set_virt_ram(self,num)
 

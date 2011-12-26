@@ -29,10 +29,6 @@ import base64
 import fcntl
 import traceback
 import glob
-try:
-    import subprocess
-except:
-    import sub_process as subprocess
 from threading import Thread
 
 import api as cobbler_api
@@ -141,11 +137,12 @@ class CobblerXMLRPCInterface:
         Generates an ISO in /var/www/cobbler/pub that can be used to install
         profiles without using PXE.
         """
+        # FIXME: better use webdir from the settings?
+        webdir = "/var/www/cobbler/"
+        if os.path.exists("/srv/www"):
+            webdir = "/srv/www/cobbler/"
+
         def runner(self):
-            # FIXME: better use webdir from the settings?
-            webdir = "/var/www/cobbler/"
-            if os.path.exists("/srv/www"):
-                webdir = "/srv/www/cobbler/"
             return self.remote.api.build_iso(
                 self.options.get("iso",webdir+"/pub/generated.iso"),
                 self.options.get("profiles",None),
@@ -1136,7 +1133,7 @@ class CobblerXMLRPCInterface:
             if ip != "" and ip != "?":
                 obj.set_ip_address(ip, iname)
             if netmask != "" and netmask != "?":
-                obj.set_subnet(netmask, iname)
+                obj.set_netmask(netmask, iname)
         self.api.add_system(obj)
         return 0
  
@@ -1294,7 +1291,7 @@ class CobblerXMLRPCInterface:
         See api.py for documentation.
         """
         self._log("version",token=token)
-        return self.api.version()
+        return self.api.version(extended=True)['version']
 
     def extended_version(self,token=None,**rest):
         """
@@ -1846,6 +1843,7 @@ class CobblerXMLRPCInterface:
         if snippet_file.find("..") != -1 or not snippet_file.startswith("/"):
             utils.die(self.logger, "tainted file location")
 
+        # FIXME: shouldn't we get snippetdir from the settings?
         if not snippet_file.startswith("/var/lib/cobbler/snippets"):
             utils.die(self.logger, "unable to view or edit snippet in this location")
         
@@ -1859,9 +1857,23 @@ class CobblerXMLRPCInterface:
                 # FIXME: no way to check if something is using it
                 os.remove(snippet_file)
             else:
-                fileh = open(snippet_file,"w+")
-                fileh.write(new_data)
-                fileh.close()
+                # path_part(a,b) checks for the path b to be inside path a. It is
+                # guaranteed to return either an empty string (meaning b is NOT inside
+                # a), or a path starting with '/'. If the path ends with '/' the sub-path 
+                # is a directory so we don't write to it.
+
+                # FIXME: shouldn't we get snippetdir from the settings?
+                path_part = utils.path_tail("/var/lib/cobbler/snippets",snippet_file)
+                if path_part != "" and path_part[-1] != "/":
+                    try:
+                        utils.mkdir(os.path.dirname(snippet_file))
+                    except:
+                        utils.die(self.logger, "unable to create directory for snippet file: '%s'" % snippet_file)
+                    fileh = open(snippet_file,"w+")
+                    fileh.write(new_data)
+                    fileh.close()
+                else:
+                    utils.die(self.logger, "invalid snippet file specified: '%s'" % snippet_file)
             return True
 
 
@@ -1948,7 +1960,7 @@ def _test_setup_modules(authn="authn_testing",authz="authz_allowall",pxe_once=1)
     MODULES_TEMPLATE = "installer_templates/modules.conf.template"
     DEFAULTS = "installer_templates/defaults"
     fh = open(DEFAULTS)
-    data = yaml.load(fh.read())
+    data = yaml.safe_load(fh.read())
     fh.close()
     data["authn_module"] = authn
     data["authz_module"] = authz
@@ -1969,7 +1981,7 @@ def _test_setup_settings(pxe_once=1):
     MODULES_TEMPLATE = "installer_templates/settings.template"
     DEFAULTS = "installer_templates/defaults"
     fh = open(DEFAULTS)
-    data = yaml.load(fh.read())
+    data = yaml.safe_load(fh.read())
     fh.close()
     data["pxe_once"] = pxe_once
 
@@ -1980,9 +1992,9 @@ def _test_setup_settings(pxe_once=1):
 
 def _test_bootstrap_restart():
 
-   rc1 = subprocess.call(["/sbin/service","cobblerd","restart"],shell=False,close_fds=True)
+   rc1 = utils.subprocess_call(None,"/sbin/service cobblerd restart",shell=False)
    assert rc1 == 0
-   rc2 = subprocess.call(["/sbin/service","httpd","restart"],shell=False,close_fds=True)
+   rc2 = utils.subprocess.call(None,"/sbin/service httpd restart",shell=False)
    assert rc2 == 0
    time.sleep(5)
    
@@ -2062,7 +2074,7 @@ def test_xmlrpc_ro():
    files = glob.glob("rpm-build/*.rpm")
    if len(files) == 0:
       raise Exception("Tests must be run from the cobbler checkout directory.")
-   subprocess.call("cp rpm-build/*.rpm /tmp/empty",shell=True,close_fds=True)
+   rc = utils.subprocess_call(None,"cp rpm-build/*.rpm /tmp/empty",shell=True)
    api.add_repo(repo)
 
    profile = api.new_profile()
@@ -2309,6 +2321,7 @@ def test_xmlrpc_rw():
    server.modify_profile(pid, "kopts_post", "noapic", token)
    server.modify_profile(pid, "virt_auto_boot", 0, token)
    server.modify_profile(pid, "virt_file_size", 20, token)
+   server.modify_profile(pid, "virt_disk_driver", "raw", token)
    server.modify_profile(pid, "virt_ram", 2048, token)
    server.modify_profile(pid, "repos", [], token)
    server.modify_profile(pid, "template-files", {}, token)
@@ -2384,6 +2397,7 @@ def test_xmlrpc_rw():
    server.modify_image(iid, "virt_auto_boot", 0, token)
    server.modify_image(iid, "virt_cpus", 1, token)
    server.modify_image(iid, "virt_file_size", 5, token)
+   server.modify_image(iid, "virt_disk_driver", "raw", token)
    server.modify_image(iid, "virt_bridge", "virbr0", token)
    server.modify_image(iid, "virt_path", "VolGroup01", token)
    server.modify_image(iid, "virt_ram", 1024, token)

@@ -1,5 +1,6 @@
 {% if pageinfo %}
 <script type="text/javascript">
+// these functions depend on the "action" form defined in generic_list
 function add_filter() {
     field_name = document.getElementById("filter_field");
     field_value = document.getElementById("filter_value");
@@ -8,8 +9,13 @@ function add_filter() {
     } else if (field_value.value == "") {
         alert("You must select a filter value.");
     } else {
-        location = '/cobbler_web/{{ what }}/modifylist/addfilter/'+field_name.value+':'+field_value.value;
+        document.forms["action"].action = '/cobbler_web/{{ what }}/modifylist/addfilter/'+field_name.value+':'+field_value.value;
+        document.forms["action"].submit();
     }
+}
+function del_filter(filter) {
+    document.forms["action"].action = '/cobbler_web/{{ what }}/modifylist/removefilter/' + filter
+    document.forms["action"].submit();
 }
 </script>
 <ul id="filter-adder">
@@ -59,9 +65,10 @@ function add_filter() {
       <option value="virt_ram">virt ram (MB)</option>
       <option value="virt_type">virt type</option>
       <option value="server">server override</option>{% endifequal %}
-      {% ifequal what "system" %}<option value="bonding">bonding</option>
-      <option value="bonding_master">bonding master</option>
+      {% ifequal what "system" %}<option value="interface_type">interface type</option>
+      <option value="interface_master">interface master</option>
       <option value="bonding_opts">bonding opts</option>
+      <option value="bridge_opts">bridge opts</option>
       <option value="comment">comment</option>
       <option value="dhcp_tag">dhcp tag</option>
       <option value="distro">distro</option>
@@ -90,8 +97,9 @@ function add_filter() {
       <option value="redhat_management_server">red hat management server</option>
       <option value="repos">repos</option>
       <option value="server">server override</option>
-      <option value="subnet">subnet</option>
+      <option value="netmask">netmask</option>
       <option value="static">static</option>
+      <option value="status">status</option>
       <option value="management">management</option>
       <option value="static_routes">static_routes</option>
       <option value="fetchable_files">fetchable files</option>
@@ -149,7 +157,7 @@ function add_filter() {
   {% if filters %}
 <ul id="filter-remover">
     {% for key,value in filters.items %}
-  <li><a href="/cobbler_web/{{ what }}/modifylist/removefilter/{{ key }}" title="remove">✖</a> {{ key }} = {{ value }}</li>
+  <li><a href="javascript:del_filter('{{ key }}');" title="remove">✖</a> {{ key }} = {{ value }}</li>
     {% endfor %}
 </ul>
   {% endif %}

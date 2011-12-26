@@ -437,13 +437,13 @@ def connect_to_server(server=None,port=None):
         raise InfoException("--server must be specified")
 
     if port is None: 
-        port = 25151 
+        port = 80
         
     connect_ok = 0
 
     try_urls = [
-        "http://%s/cobbler_api" % (server),
-        "https://%s/cobbler_api" % (server),
+        "http://%s:%s/cobbler_api" % (server,port),
+        "https://%s:%s/cobbler_api" % (server,port),
     ]
     for url in try_urls:
         print "- looking for Cobbler at %s" % url

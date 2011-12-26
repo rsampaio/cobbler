@@ -69,7 +69,8 @@ def start_install(name=None,
                   bridge=None,
                   virt_type=None,
                   virt_auto_boot=False,
-                  qemu_driver_type=None):
+                  qemu_driver_type=None,
+                  qemu_net_type=None):
 
     vtype = "qemu"
     if virtinst.util.is_kvm_capable():
@@ -157,6 +158,7 @@ def start_install(name=None,
     guest.set_name(name)
     guest.set_memory(ram)
     guest.set_vcpus(vcpus)
+    guest.set_autostart(virt_auto_boot)
     # for KVM, we actually can't disable this, since it's the only
     # console it has other than SDL
     guest.set_graphics("vnc")
@@ -165,9 +167,14 @@ def start_install(name=None,
         guest.set_uuid(uuid)
 
     for d in disks:
-        print "- adding disk: %s of size %s" % (d[0], d[1])
+        print "- adding disk: %s of size %s (driver type=%s)" % (d[0], d[1], d[2])
         if d[1] != 0 or d[0].startswith("/dev"):
-            guest.disks.append(virtinst.VirtualDisk(d[0], size=d[1], bus=qemu_driver_type))
+            vdisk = virtinst.VirtualDisk(d[0], size=d[1], bus=qemu_driver_type)
+            try:
+                vdisk.set_driver_type(d[2])
+            except:
+                print "- virtinst failed to create the VirtualDisk with the specified driver type (%s), using whatever it defaults to instead" % d[2]
+            guest.disks.append(vdisk)
         else:
             raise koan.InfoException("this virtualization type does not work without a disk image, set virt-size in Cobbler to non-zero")
 
@@ -180,7 +187,7 @@ def start_install(name=None,
         for iname in interfaces:
             intf = profile_data["interfaces"][iname]
 
-            if intf["bonding"] == "master" or vlanpattern.match(iname) or iname.find(":") != -1:
+            if intf["interface_type"] in ("master","bond","bridge") or vlanpattern.match(iname) or iname.find(":") != -1:
                 continue
 
             mac = intf["mac_address"]
@@ -201,7 +208,7 @@ def start_install(name=None,
                 else:
                     bridges = bridge.split(",")  
                     intf_bridge = bridges[counter]
-            nic_obj = virtinst.VirtualNetworkInterface(macaddr=mac, bridge=intf_bridge)
+            nic_obj = virtinst.VirtualNetworkInterface(macaddr=mac, bridge=intf_bridge, model=qemu_net_type)
             guest.nics.append(nic_obj)
             counter = counter + 1
 
@@ -215,7 +222,7 @@ def start_install(name=None,
             if profile_bridge == "":
                 raise koan.InfoException("virt-bridge setting is not defined in cobbler")
 
-            nic_obj = virtinst.VirtualNetworkInterface(macaddr=random_mac(), bridge=profile_bridge)
+            nic_obj = virtinst.VirtualNetworkInterface(macaddr=random_mac(), bridge=profile_bridge, model=qemu_net_type)
             guest.nics.append(nic_obj)
 
     guest.start_install()
