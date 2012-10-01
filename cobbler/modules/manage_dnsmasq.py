@@ -137,9 +137,10 @@ class DnsmasqManager:
                     else:
                         systxt = ""
 
-                dhcp_tag = interface["dhcp_tag"]
-                if dhcp_tag == "":
-                   dhcp_tag = profile.dhcp_tag
+                if (system.netboot_enabled):
+                    dhcp_tag = interface["dhcp_tag"]
+                    if dhcp_tag == "":
+                       dhcp_tag = profile.dhcp_tag
                 if dhcp_tag == "":
                    dhcp_tag = "default"
 
