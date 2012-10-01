@@ -169,6 +169,8 @@ class IscManager:
 
                 dhcp_tag = interface["dhcp_tag"]
                 if dhcp_tag == "":
+                   dhcp_tag = profile.dhcp_tag
+                if dhcp_tag == "":
                    dhcp_tag = "default"
 
 

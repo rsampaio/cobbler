@@ -98,6 +98,7 @@ class DnsmasqManager:
 
 
         system_definitions = {}
+        dhcp_tags = { "default": {} }
         counter = 0
         
         # we used to just loop through each system, but now we must loop
@@ -138,7 +139,17 @@ class DnsmasqManager:
 
                 dhcp_tag = interface["dhcp_tag"]
                 if dhcp_tag == "":
+                   dhcp_tag = profile.dhcp_tag
+                if dhcp_tag == "":
                    dhcp_tag = "default"
+
+
+                if not dhcp_tags.has_key(dhcp_tag):
+                    dhcp_tags[dhcp_tag] = {
+                       mac: interface
+                    }
+                else:
+                    dhcp_tags[dhcp_tag][mac] = interface
 
                 if not system_definitions.has_key(dhcp_tag):
                     system_definitions[dhcp_tag] = ""
@@ -151,7 +162,8 @@ class DnsmasqManager:
            "date"           : time.asctime(time.gmtime()),
            "cobbler_server" : self.settings.server,
            "next_server"    : self.settings.next_server,
-           "elilo"          : elilo
+           "elilo"          : elilo,
+           "dhcp_tags"      : dhcp_tags
         }
 
         # now add in other DHCP expansions that are not tagged with "default"
