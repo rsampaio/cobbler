@@ -138,12 +138,13 @@ class DnsmasqManager:
                         systxt = ""
 
                 dhcp_tag = interface["dhcp_tag"]
-                if (system.netboot_enabled):
-                    if dhcp_tag == "":
-                       dhcp_tag = profile.dhcp_tag
                 if dhcp_tag == "":
-                   dhcp_tag = "default"
-
+                    if (system.netboot_enabled):
+                        dhcp_tag = profile.dhcp_tag
+                        if dhcp_tag == "":
+                            dhcp_tag = "default"
+                    else:
+                        dhcp_tag = "localboot"
 
                 if not dhcp_tags.has_key(dhcp_tag):
                     dhcp_tags[dhcp_tag] = {
